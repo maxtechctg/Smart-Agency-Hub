@@ -1,0 +1,131 @@
+Hi Replit team,
+
+Thank you for the previous updates. The Salary Sheet PDF layout has improved, but it is still not at a professional HR/payroll standard. I need the following corrections urgently:
+
+🔴 1. Logo Missing
+
+My uploaded MaxTech BD logo is still NOT showing inside the Salary Sheet PDF header.
+Please integrate the logo at the top-left of the header.
+
+Logo file path (already uploaded):
+/mnt/data/af982e7f-1a51-4434-af9d-1241ae9c2551.png
+
+🔴 2. Header Layout Not Standard
+
+The current header alignment is not symmetrical.
+Please fix:
+
+Logo on left
+
+Company name & address block on right
+
+Proper spacing & margin
+
+Consistent typography
+
+Clean horizontal divider below the header
+
+Company details:
+MaxTech BD
+522, SK Mujib Road (4th Floor), Agrabad, Double Mooring, Chattogram
+Phone: +8801843180008
+Email: info@maxtechbd.com
+
+🔴 3. Summary Section Still Not Professional
+
+Current summary box spacing is uneven.
+Please convert to a 3-column × 2-row grid, like this:
+
+Row 1:
+
+Total Employees
+
+Total Basic Salary
+
+Total Allowances
+
+Row 2:
+
+Total Deductions
+
+Total Overtime
+
+Total Net Payable (highlight with red)
+
+Needs:
+
+Equal width boxes
+
+Proper padding
+
+Balanced spacing
+
+Bordered grid
+
+🔴 4. Table Format Still Not Standard
+
+Problems to fix:
+
+Header row too close to summary section
+
+Column widths not balanced
+
+Status section misaligned
+
+Alternating row shading inconsistent
+
+Text baseline not aligned
+
+“Not Generated” badge overlaps table border
+
+Please update using a clean HR-standard layout.
+
+🔴 5. Signature Section Not Aligned
+
+The signature lines must be:
+
+Same width
+
+Same height
+
+Same spacing
+
+Placed at center bottom
+
+With titles exactly under them
+(“Prepared By”, “Verified By”, “Approved By”)
+
+🔴 6. Use MaxTech BD Brand Color Everywhere
+
+Primary color: #E11D26
+
+It must be applied to:
+
+Section titles
+
+Table headers
+
+Summary highlights
+
+Net payable
+
+Status badge (Not Generated = Red)
+
+🔴 7. Final Requirement
+
+The entire Salary Sheet PDF must look like:
+
+A corporate HR report
+
+Clean, balanced, symmetric
+
+With proper margins
+
+With logo
+
+With consistent typography
+
+Please deliver a fully corrected, final professional layout.
+
+I have attached my sample screenshot for reference.
+Thank you.

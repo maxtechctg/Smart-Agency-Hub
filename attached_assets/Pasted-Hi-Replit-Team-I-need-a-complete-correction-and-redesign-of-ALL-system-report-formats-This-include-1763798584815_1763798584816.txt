@@ -1,0 +1,135 @@
+Hi Replit Team,
+I need a complete correction and redesign of ALL system report formats. This includes styling improvements, branding, and export capabilities.
+
+🚨 ISSUE SUMMARY
+
+Across the system, all report outputs have formatting issues:
+
+Invoice PDF looks unprofessional
+
+Profit & Loss PDF layout is broken
+
+Missing branding elements
+
+No consistent margins/spacing
+
+Table alignment problems
+
+Colors don’t match brand identity
+
+Some reports don’t have download options
+
+Example incorrect report:
+/mnt/data/5f3e7fdd-c763-47d0-ba12-6ddddf2f96bd.png
+
+📌 REQUIRED FIXES FOR ALL REPORTS
+
+Please update every report (Invoice, Profit & Loss, Financial Reports, Salary Slip, Payroll, Ledger, HR reports, etc.) with the following requirements:
+
+1️⃣ Add Full MaxTech BD Branding to ALL Reports
+✔ Must include logo
+
+(Already uploaded earlier)
+
+✔ Must include official company details (top-right or footer)
+MaxTech BD  
+522, SK Mujib Road (4th Floor),  
+Agrabad, Double Mooring,  
+Chattogram, Bangladesh  
+Phone: +8801843180008  
+Email: info@maxtechbd.com
+
+2️⃣ Apply Professional Corporate Formatting
+
+Please ensure:
+
+Clean layout
+
+Proper alignment
+
+Correct spacing & padding
+
+Modern professional fonts
+
+Branded colors
+
+Red: #E11D26
+
+Black: #1E1E1E
+
+Gray: #444444
+
+Consistent header/footer
+
+Bold section titles
+
+Proper tables with clear borders
+
+Highlighted totals
+
+Auto-generated date at bottom-right
+
+Page margins corrected
+
+Must use the same design style across all reports
+
+3️⃣ Add Export Options to ALL Reports
+
+Every report must have:
+
+✔ Export as PDF
+✔ Export as Excel (.xlsx)
+✔ Export as Word (.docx)
+
+Download buttons must be visible inside each report page.
+
+This is mandatory for:
+
+Invoice
+
+Payments receipt
+
+Profit & Loss
+
+Financial reports
+
+Payroll
+
+Salary slip
+
+Ledger report
+
+HR attendance
+
+Leave summary
+
+Any other auto-generated report
+
+4️⃣ NO OTHER MODULE SHOULD BE TOUCHED
+
+Please do NOT change:
+
+Dashboard
+
+Projects
+
+Tasks
+
+HR logic
+
+Accounts logic
+
+Chat
+
+API
+
+Database structure
+
+Only update report templates, formatting, and export buttons.
+
+🎯 Final Goal
+
+All reports must look clean, branded, and fully professional — suitable for clients, investors, and internal accounting.
+
+Please proceed with these corrections.
+Thank you!

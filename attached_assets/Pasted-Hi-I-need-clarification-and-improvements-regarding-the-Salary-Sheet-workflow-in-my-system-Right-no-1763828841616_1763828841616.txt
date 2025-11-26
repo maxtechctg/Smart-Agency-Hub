@@ -1,0 +1,105 @@
+Hi, I need clarification and improvements regarding the Salary Sheet workflow in my system.
+Right now, the Salary Sheet only shows basic salary and allowances, but it does not follow real-life HR/Payroll logic.
+
+❗ I need you to explain what is the actual expected behaviour and then implement it.
+❌ Current Issues
+
+The system does NOT generate actual salary based on employee attendance.
+
+Late days, absents, and overtime do NOT affect salary.
+
+There is no “Salary Generate / Process Month” option.
+
+No option for manual attendance override (in case admin wants to correct attendance).
+
+The Salary Sheet only displays data but does not calculate salary based on rules.
+
+✅ What the Salary Module SHOULD DO (Actual Behaviour Needed)
+1. Salary must be generated from attendance
+
+For every month:
+
+Absent days = salary deduction
+
+Late 3 days = 1 absent (Standard HR rule)
+
+Overtime hours = extra pay
+
+Half day = 0.5 salary deduction
+
+2. Automatic Salary Calculation Formula
+
+Admin should be able to generate salary using:
+
+Basic Salary = Monthly Salary  
+Daily Rate = Basic Salary / 30  
+
+Absent Deduction = Daily Rate × Absent Days  
+Late Deduction = Daily Rate × (LateDays / 3)  
+Net Salary = Basic Salary + Allowances - (Absent + Late + Other deductions)
+
+3. Manual Attendance Input
+
+Admin must get an option:
+
+➡️ Add Manual Attendance
+➡️ Add Adjustments (Bonus, Penalty, Deduction)
+➡️ These must affect final salary calculation.
+
+4. Actual Salary Generation Flow (Needed)
+
+Select Month / Year
+
+Load attendance for all employees
+
+Apply salary structure (basic, house rent, transport etc.)
+
+Apply attendance rules
+
+Apply manual adjustments (if any)
+
+Generate Salary
+
+Mark payment status (Generated / Paid)
+
+✅ What I need you to build now
+
+Add Salary Processing Button
+→ “Generate Salary for Selected Month”
+
+Calculate Salary Based on Attendance
+→ Late
+→ Absent
+→ Overtime
+→ Manual attendance input
+
+Salary Sheet must show full HR details:
+
+Present Days
+
+Absent Days
+
+Late Days
+
+Overtime Hours
+
+Deductions
+
+Final Payable Salary
+
+Payment Status (Generated / Paid)
+
+Attendance → Salary Integration
+Everything should be fully synced.
+
+⚠️ Why this is important
+
+Right now the Salary Sheet PDF is designed beautifully,
+but the salary logic is not real HR logic,
+so it cannot be used for a real company.
+
+I need the complete salary processing system,
+not just a display.
+
+If you need any sample HR rules or formulas, let me know.
+Please update the module according to these requirements.

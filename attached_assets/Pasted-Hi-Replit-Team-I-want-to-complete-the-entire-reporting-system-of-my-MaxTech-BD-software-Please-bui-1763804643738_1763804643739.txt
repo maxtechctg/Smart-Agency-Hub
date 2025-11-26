@@ -1,0 +1,135 @@
+Hi Replit Team,
+I want to complete the entire reporting system of my MaxTech BD software.
+Please build and finalize all remaining reports, ensure proper branding, and add PDF + Excel + Word export for all reports.
+
+Below is the full requirement breakdown:
+
+1️⃣ Salary Slip (Employee Wise)
+
+Route: /hr/salary-slip
+Requirements:
+
+Auto-generate employee-wise salary slip
+
+Fields: employee info, salary breakdown, deductions, net pay, signature area
+
+Must use MaxTech BD branding
+
+Export: PDF, Excel, Word
+
+2️⃣ Payment Receipt Report
+
+Route: /accounts/payment-receipt
+Requirements:
+
+Show client payments with invoice reference
+
+Auto-generate receipt
+
+Add logo, address, phone, email
+
+Export: PDF, Excel, Word
+
+3️⃣ HR Attendance Report
+
+Route: /hr/attendance-report
+Requirements:
+
+Present/Absent/Late summary
+
+Daily/Monthly filter
+
+Show punch logs
+
+Export: PDF, Excel, Word
+
+4️⃣ Leave Summary Report
+
+Route: /hr/leave-summary
+Requirements:
+
+Leave taken, balance, approval status
+
+Employee-wise filter
+
+Export: PDF, Excel, Word
+
+5️⃣ Financial Summary Report
+
+Route: /accounts/financial-summary
+Requirements:
+
+Monthly/Yearly income & expenses
+
+Category-wise breakdown
+
+Trend charts
+
+Export: PDF, Excel, Word
+
+6️⃣ General Ledger Full Export
+
+Route: /accounts/general-ledger
+Requirements:
+
+All transactions: income, expenses, payroll, payments
+
+Date range filter
+
+Export: PDF, Excel, Word
+
+7️⃣ System-Wide Branding Update
+
+Apply to all reports, invoices & PDFs:
+
+Logo update
+
+Address update:
+522, SK Mujib Road (4th Floor), Agrabad, Double Mooring, Chattogram, Bangladesh
+
+Phone: +8801843180008
+
+Email: info@maxtechbd.com
+
+Brand color: #E11D26 (Red)
+
+Remove $ sign globally → replace with BDT
+
+8️⃣ Make All Report Designs Professional
+
+Proper table alignment
+
+Headers/Footers consistent
+
+MaxTech BD logo at top
+
+Summary box at bottom
+
+Clean spacing & bold section titles
+
+9️⃣ Add Download Button to All Reports
+
+Every report must have 3 buttons:
+
+Download PDF
+
+Download Excel
+
+Download Word
+
+🔒 10️⃣ Do NOT modify any existing module
+
+Please do NOT touch the following:
+
+HR core features
+
+Accounts data
+
+Payroll calculations
+
+Projects/CRM
+
+Chat system
+
+Tasks, Files, Finance
+Only add new report pages and export features.

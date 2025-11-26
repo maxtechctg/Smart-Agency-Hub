@@ -1,0 +1,219 @@
+Hi Replit 👋
+I want to extend our existing Smart Agency Control Hub System by adding a complete HR + Payroll + Attendance Machine Integration module based on my suggestions and advanced recommendations.
+
+Please integrate the following into the existing system:
+
+🟦 1. Attendance Machine (Device) Integration
+
+Add support for biometric devices such as:
+
+ZKTeco (K40, MB160, F18, iFace, UFace)
+
+Suprema / Nitgen / Anviz (universal API-ready architecture)
+
+Requirements:
+
+Create a device-sync service
+
+Support Pull API and Push API logs
+
+Sync logs every 1 minute using cron
+
+Save punch logs into attendance table automatically
+
+Auto-detect: on-time, late, absent
+
+🟦 2. Advanced Attendance Features
+
+Please add:
+
+Grace period settings (e.g., 10 mins)
+
+Half-day rules
+
+Work-from-home support
+
+Auto late detection logic
+
+Punch correction with admin approval
+
+Late reason entry field
+
+Daily attendance summary
+
+Monthly attendance report
+
+Backend + UI both required.
+
+🟦 3. Full Payroll System
+
+Extend system by adding a complete Payroll module:
+
+Salary Structure:
+
+Basic salary
+
+Allowances (house, food, travel)
+
+Overtime
+
+Loan/Advance system
+
+Deductions
+
+Net salary calculation
+
+Salary Generation:
+
+Monthly salary sheet
+
+Auto-calculate overtime
+
+Auto-calculate deduction
+
+Employee-wise salary history
+
+🟦 4. Late Deduction Policy (My Requirement)
+
+Add automatic late deduction:
+
+Rule Example:
+Every 3 late days = 1 day salary deduct
+
+System should:
+
+Count monthly late days
+
+Apply deduction rule
+
+Generate final payable salary
+
+Save deduction breakdown in payroll table
+
+Formula:
+deduction_days = floor(total_late_days / 3)
+deduction_amount = (monthly_salary / working_days) * deduction_days
+final_salary = monthly_salary - deduction_amount
+
+🟦 5. Leave Management Module
+
+Add a Leave System:
+
+Leave types: annual, sick, casual
+
+Leave apply form
+
+Admin approval
+
+Leave calendar
+
+Leave balance auto-update
+
+Integration with attendance
+
+🟦 6. Employee Performance Index (New Suggestion)
+
+Create a Performance Index combining:
+
+Attendance (late, absent)
+
+Task completion ratio
+
+On-time delivery
+
+Quality score (simple rating)
+
+Workload stats
+
+Add a “Performance Score” widget in Dashboard.
+
+🟦 7. Universal HR Module
+
+Add:
+
+Employee profile
+
+Employee roles
+
+Joining date
+
+Documents upload
+
+Salary structure per employee
+
+Department & designation
+
+🟦 8. Salary Slip Generation
+
+Add:
+
+Automatic monthly PDF payslip
+
+Download & email option
+
+Invoice-style layout
+
+🟦 9. HR Settings Panel
+
+Add settings section:
+
+Grace period
+
+Office start/end time
+
+Working days
+
+Late deduction rule
+
+Overtime rate
+
+Device IP + Device API config
+
+🟦 10. Future-Proof Architecture
+
+Please structure all new modules so we can later extend:
+
+Multi-tenant HR SaaS
+
+Mobile attendance (GPS)
+
+Face recognition punch
+
+AI-based performance scoring
+
+AI leave approval suggestions
+
+🟦 Tasks to Start Now
+
+Create new tables:
+
+employees
+
+payroll
+
+salary_structure
+
+salary_settings
+
+late_policy
+
+attendance_logs_device
+
+leave_requests
+
+leave_types
+
+Build backend endpoints
+
+Build frontend UI pages
+
+Integrate cron jobs for daily & monthly operations
+
+Add admin settings UI
+
+Add PDF generation for salary slip
+
+Please integrate everything step-by-step and ask me if anything is missing.
+This is a major HR + Payroll + Attendance expansion of our existing system.
+
+Thank you!

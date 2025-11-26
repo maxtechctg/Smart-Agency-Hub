@@ -1,0 +1,131 @@
+Please upgrade the Smart Lead Finder feature in my Leads module with the following improvements. Right now it only shows 9 results; I want it to be a powerful lead–hunting tool.
+
+1. Fetch more results from SerpAPI
+
+In the backend SerpAPI call for Smart Lead Finder:
+
+Increase num from the default (10) to 30 or 50.
+
+Add pagination support using start (or SerpAPI’s page / next_page_token if available).
+
+The API should accept page or cursor from the frontend and return:
+
+results (array)
+
+total_results if available
+
+page, hasMore (true/false)
+
+2. Smarter filtering (don’t limit to only 9)
+
+Currently it looks like you filter very aggressively (must have email + phone + website).
+
+Please change the rule to:
+
+Include any business that has at least one of: email, phone, or website.
+
+Mark missing fields in the UI (e.g. show “—” or grey text).
+
+This alone will increase the number of visible rows a lot.
+
+3. Combine multiple SerpAPI sources
+
+For each search:
+
+Use google engine with Local results (Maps / local_pack).
+
+Optionally also use google_maps or google_local engine if that gives richer business data.
+
+Merge the results, deduplicate by domain / business name.
+
+Extract these fields per business if available:
+
+name
+
+category / type
+
+phone
+
+email (if SerpAPI returns it)
+
+website
+
+rating / reviews
+
+address / location
+
+4. Frontend – better UI in the Smart Lead Finder dialog
+
+At the top of the modal, show:
+
+X results found, showing 1–30, and total if we know it.
+
+Add a “Load More” button at the bottom:
+
+When clicked, call the backend with page + 1 and append rows.
+
+Keep the existing checkbox selection and “Import Selected” behavior.
+
+For each row, show:
+
+Business Name
+
+Contact (email / phone – even if only one is available)
+
+Website (clickable link)
+
+Rating (if available)
+
+Category / Source (e.g. “Google Local”, “Organic”)
+
+5. Import logic – category & duplicate handling
+
+When user clicks Import Selected:
+
+Create leads in the existing leads table using:
+
+name → lead name
+
+email → lead email
+
+phone → lead phone
+
+website → lead website
+
+source → set to "Smart Lead Finder"
+
+category → either:
+
+auto–mapped from business type (IT, Marketing, Real Estate, etc.), or
+
+ask the user to choose a category once for the whole import (simple dropdown).
+
+Avoid duplicates:
+
+If a lead with same email or website already exists, skip it and show it in a “Skipped (duplicate)” list in the result summary.
+
+6. Optional enhancements (if time allows)
+
+Add location field support properly:
+
+If user enters Location, pass it to SerpAPI’s location / uule parameter so that results are more accurate.
+
+Add saved search presets:
+
+Example: “Real Estate in Dhaka”, “Pharmacy in Chattogram”, etc.
+
+Log Smart Lead Finder imports in a separate table (e.g. lead_imports) for analytics.
+
+Expected outcome
+
+After this upgrade I should be able to:
+
+Search e.g. “IT companies in Dhaka” and get dozens of businesses, not just 9.
+
+Scroll / click “Load More” to see additional pages.
+
+Select many businesses and import them to Leads with one click.
+
+See them categorized and without duplicates inside my existing Leads module.
+
+Please implement this full upgrade without changing other modules, and keep the UI consistent with the current design.

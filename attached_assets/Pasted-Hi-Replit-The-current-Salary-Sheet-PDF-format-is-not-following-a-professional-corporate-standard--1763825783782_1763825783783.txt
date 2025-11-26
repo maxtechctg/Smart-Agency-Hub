@@ -1,0 +1,124 @@
+Hi Replit,
+
+The current Salary Sheet PDF format is not following a professional corporate standard. I need this to be fully redesigned with a clean, modern layout that matches official HR/payroll documents.
+
+🔧 Issues in the current format
+
+Layout spacing inconsistent
+
+Table header alignment broken
+
+Fonts are too basic
+
+Branding not properly structured
+
+Summary section spacing unbalanced
+
+Signature lines misaligned
+
+Table columns look stretched and not uniform
+
+No border or proper separation between sections
+
+🛠️ What I want Replit to fix
+
+Please redesign the Salary Sheet PDF into a standard HR-compliant format, similar to corporate payroll documents.
+The design should include:
+
+Brand Header (Top Section)
+
+My company logo (already provided)
+
+Company Name: MaxTech BD
+
+Address: 522, SK Mujib Road (4th Floor), Agrabad, Double Mooring, Chattogram, Bangladesh
+
+Phone: +8801843180008
+
+Email: info@maxtechbd.com
+
+Report Header
+
+Title: Salary Sheet
+
+Period: Month + Year
+
+Generated Date & Time
+
+Consistent spacing and alignment
+
+Summary Box (Better Design)
+
+Total Employees
+
+Total Basic Salary
+
+Total Allowances
+
+Total Deductions
+
+Total Overtime
+
+Total Net Payable
+
+➡️ All values must be neatly aligned in a 2-column or 3-column grid.
+
+Main Table
+
+A clean, bordered, professionally padded table with:
+
+Employee Name
+
+Employee ID
+
+Department
+
+Designation
+
+Basic Salary
+
+Allowances
+
+Deductions
+
+Overtime
+
+Net Salary
+
+Status
+
+➡️ Columns must be aligned, evenly spaced, and readable.
+
+Footer
+
+Three signature lines:
+
+Prepared By
+
+Verified By
+
+Approved By
+
+Company footer text (small size, center aligned)
+
+📌 Additional Requirements
+
+Use consistent fonts (Roboto, Open Sans or similar)
+
+Proper padding/margins
+
+Modern table styling with subtle borders
+
+Keep branding color #E11D26
+
+Ensure BDT formatting everywhere (comma + decimal)
+
+Ensure landscape layout is balanced
+
+📌 Summary
+
+👉 Please redesign the Salary Sheet PDF layout completely using a professional HR/payroll formatting standard.
+👉 Keep full MaxTech BD branding.
+👉 Ensure spacing, layout, table, footer, and summary look polished.
+
+Thank you!

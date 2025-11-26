@@ -1,0 +1,89 @@
+Hi, I need an important update to the chat system.
+Right now the chat widget requires selecting a project, but I want a unified inbox system like Intercom/Crisp.
+
+🔧 New Requirement: Unified Developer Inbox (No Project Selection Needed)
+
+Please remove the project dropdown from the chat widget.
+I want the chat to work like this:
+
+✔ 1. Developer or Admin will NOT select any project manually.
+
+When a developer logs in, the chat widget should automatically load all conversations from all projects assigned to that developer.
+
+✔ 2. All messages should appear in one unified chat inbox.
+
+Example: If developer Monsur is assigned to two projects:
+
+Client A → Project 1
+
+Client B → Project 2
+
+Then the chat widget should show all incoming messages together (like Intercom inbox).
+
+✔ 3. Each message must show:
+
+Client Name
+
+Project Name
+
+Message text
+
+Timestamp
+
+This way developer can easily see who sent the message.
+
+✔ 4. When developer replies:
+
+The system must automatically route the reply based on the message’s:
+
+client_id
+
+project_id
+
+Developer will NOT choose anything manually.
+The reply must go directly to the correct client.
+
+✔ 5. Backend should auto-detect the routing:
+
+When developer sends reply:
+
+find the conversation’s project_id
+
+find the conversation’s client_id
+
+store reply under that project
+
+trigger websocket to that client
+So the developer only types a message — no dropdown, no selection.
+
+✔ 6. Client-side:
+
+Clients will only see messages related to their own project (as usual).
+
+✔ 7. Purpose:
+
+This makes the chat act like Intercom-style “Unified Developer Inbox,” where all assigned project messages appear together automatically.
+
+🔍 In short:
+
+❌ No project dropdown in chat widget
+
+✅ One unified inbox for developer
+
+✔ Auto-routing based on message metadata
+
+✔ Show project & client info inside each message
+
+✔ Unified messaging experience like Intercom/Zendesk
+
+Please update the chat widget + backend routing accordingly.
+
+Let me know when it’s done.
+
+If you want Farid, I can also prepare:
+
+✅ database model changes
+✅ API endpoint logic
+✅ exact code structure (React + WebSocket + Node/Express)
+
+Just tell me.

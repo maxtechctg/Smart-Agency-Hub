@@ -1,0 +1,136 @@
+Hi team,
+
+I need your help finalizing the Salary Sheet PDF layout. Right now the salary sheet is not in a standard/payroll-friendly format and several important columns are missing.
+
+1. Current Problems
+
+Layout not standard
+
+The PDF is portrait and leaves a lot of empty white space at the bottom.
+
+Header and body don’t look balanced; it doesn’t feel like a professional payroll report.
+
+Missing important columns
+
+At the moment I only see:
+Emp ID, Name, Department, Designation, Basic, Allowances, Deduct, OT, Net Salary.
+
+For a real-life salary sheet I need more detailed breakdowns of earnings and deductions.
+
+Totals / summary area is too basic
+
+Top summary shows only very few totals.
+
+No clear total gross salary, total deductions, or total net payable for the month.
+
+Orientation
+
+For a full salary sheet with many columns, A4 landscape is required.
+
+Right now the design does not use the width properly.
+
+2. What I Want the Salary Sheet to Look Like
+
+Please redesign the Salary Sheet PDF as a professional A4 landscape report with:
+
+(A) Header
+
+Company logo + company name “MaxTech BD”
+
+Address, phone, email.
+
+Title: “Salary Sheet – {Month} {Year}”
+
+Generated date & time.
+
+Optional: small sub-title with branch/office if needed.
+
+(B) Table Columns (per employee)
+
+I need at least the following columns:
+
+Employee Code
+
+Employee Name
+
+Department
+
+Designation
+
+Earnings / Gross:
+
+Basic
+
+House Rent Allowance
+
+Medical Allowance
+
+Conveyance / Transport Allowance
+
+Other Allowances
+
+Gross Salary (sum of all earnings)
+
+Attendance impact:
+
+Present Days
+
+Absent Days
+
+Late Days
+
+Half Days
+
+OT Hours (if overtime is enabled; otherwise show 0.00)
+
+Deductions:
+
+Late / Absence Deduction
+
+Advance / Loan Deduction
+
+Other Deductions
+
+Total Deductions
+
+Final:
+
+Net Payable Salary
+
+You can adjust the exact names/shorten them (e.g. “HRA”, “Med”, “Conv”), but the data should be there.
+
+(C) Totals Row
+
+At the bottom of the table, add a Total row that shows:
+
+Total Basic
+
+Total Gross
+
+Total Deductions
+
+Total Net Payable
+
+for all employees in that month.
+
+(D) Footer / Signatures
+
+At the bottom of the page, add three signature lines:
+
+Prepared By
+
+Verified By
+
+Approved By
+
+And a small footer like:
+
+“MaxTech BD | Smart Agency Control Hub”
+
+3. Behaviour / Data Source (for confirmation)
+
+The data should come from the existing salary generation logic (attendance-driven), so the numbers in the PDF must match the figures in the salary sheet page (Net Salary, Deductions, etc.).
+
+The PDF should fit in a single A4 landscape page for typical staff counts (e.g. 10–20 employees). If more employees, it can continue on the next page but keep the same header and column widths.
+
+Please update the Salary Sheet PDF to follow this specification and make it look like a professional payroll report that I can directly share/print for accounts and audit.

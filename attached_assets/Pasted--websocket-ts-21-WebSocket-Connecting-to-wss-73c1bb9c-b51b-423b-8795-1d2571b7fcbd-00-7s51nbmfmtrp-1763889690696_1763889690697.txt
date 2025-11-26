@@ -1,0 +1,326 @@
+ websocket.ts:21 WebSocket: Connecting to wss://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/ws
+notification-bell.tsx:67 Notification Bell: Connecting to WebSocket
+chat-widget.tsx:256 📊 MESSAGES UPDATED: 0 messages
+chat-widget.tsx:257 🎯 SELECTED CONVERSATION: null
+hr-attendance.tsx:404 Uncaught TypeError: Cannot read properties of undefined (reading 'fullName')
+    at hr-attendance.tsx:404:47
+    at Array.map (<anonymous>)
+    at Object.render (hr-attendance.tsx:402:45)
+    at Controller (chunk-4BFJKWC4.js?v=18d30565:298:35)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=18d30565:11548:26)
+    at updateFunctionComponent (chunk-RPCDYKBN.js?v=18d30565:14582:28)
+    at beginWork (chunk-RPCDYKBN.js?v=18d30565:15924:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=18d30565:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=18d30565:3699:24)
+    at invokeGuardedCallback (chunk-RPCDYKBN.js?v=18d30565:3733:39)
+(anonymous) @ hr-attendance.tsx:404
+render @ hr-attendance.tsx:402
+Controller @ chunk-4BFJKWC4.js?v=18d30565:298
+renderWithHooks @ chunk-RPCDYKBN.js?v=18d30565:11548
+updateFunctionComponent @ chunk-RPCDYKBN.js?v=18d30565:14582
+beginWork @ chunk-RPCDYKBN.js?v=18d30565:15924
+callCallback2 @ chunk-RPCDYKBN.js?v=18d30565:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=18d30565:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=18d30565:3733
+beginWork$1 @ chunk-RPCDYKBN.js?v=18d30565:19765
+performUnitOfWork @ chunk-RPCDYKBN.js?v=18d30565:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=18d30565:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=18d30565:19116
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18874
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=18d30565:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=18d30565:555
+flush @ @tanstack_react-query.js?v=18d30565:569
+batch @ @tanstack_react-query.js?v=18d30565:587
+dispatch_fn @ @tanstack_react-query.js?v=18d30565:996
+setData @ @tanstack_react-query.js?v=18d30565:696
+onSuccess @ @tanstack_react-query.js?v=18d30565:897
+resolve @ @tanstack_react-query.js?v=18d30565:456
+Promise.then
+run @ @tanstack_react-query.js?v=18d30565:498
+start @ @tanstack_react-query.js?v=18d30565:536
+fetch @ @tanstack_react-query.js?v=18d30565:926
+executeFetch_fn @ @tanstack_react-query.js?v=18d30565:2211
+onSubscribe @ @tanstack_react-query.js?v=18d30565:1898
+subscribe @ @tanstack_react-query.js?v=18d30565:24
+(anonymous) @ @tanstack_react-query.js?v=18d30565:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=18d30565:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=18d30565:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=18d30565:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=18d30565:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=18d30565:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=18d30565:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=18d30565:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=18d30565:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=18d30565:19432
+commitRoot @ chunk-RPCDYKBN.js?v=18d30565:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=18d30565:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18718
+workLoop @ chunk-RPCDYKBN.js?v=18d30565:197
+flushWork @ chunk-RPCDYKBN.js?v=18d30565:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=18d30565:384Understand this error
+hr-attendance.tsx:404 Uncaught TypeError: Cannot read properties of undefined (reading 'fullName')
+    at hr-attendance.tsx:404:47
+    at Array.map (<anonymous>)
+    at Object.render (hr-attendance.tsx:402:45)
+    at Controller (chunk-4BFJKWC4.js?v=18d30565:298:35)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=18d30565:11548:26)
+    at updateFunctionComponent (chunk-RPCDYKBN.js?v=18d30565:14582:28)
+    at beginWork (chunk-RPCDYKBN.js?v=18d30565:15924:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=18d30565:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=18d30565:3699:24)
+    at invokeGuardedCallback (chunk-RPCDYKBN.js?v=18d30565:3733:39)
+(anonymous) @ hr-attendance.tsx:404
+render @ hr-attendance.tsx:402
+Controller @ chunk-4BFJKWC4.js?v=18d30565:298
+renderWithHooks @ chunk-RPCDYKBN.js?v=18d30565:11548
+updateFunctionComponent @ chunk-RPCDYKBN.js?v=18d30565:14582
+beginWork @ chunk-RPCDYKBN.js?v=18d30565:15924
+callCallback2 @ chunk-RPCDYKBN.js?v=18d30565:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=18d30565:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=18d30565:3733
+beginWork$1 @ chunk-RPCDYKBN.js?v=18d30565:19765
+performUnitOfWork @ chunk-RPCDYKBN.js?v=18d30565:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=18d30565:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=18d30565:19116
+recoverFromConcurrentError @ chunk-RPCDYKBN.js?v=18d30565:18736
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18879
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=18d30565:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=18d30565:555
+flush @ @tanstack_react-query.js?v=18d30565:569
+batch @ @tanstack_react-query.js?v=18d30565:587
+dispatch_fn @ @tanstack_react-query.js?v=18d30565:996
+setData @ @tanstack_react-query.js?v=18d30565:696
+onSuccess @ @tanstack_react-query.js?v=18d30565:897
+resolve @ @tanstack_react-query.js?v=18d30565:456
+Promise.then
+run @ @tanstack_react-query.js?v=18d30565:498
+start @ @tanstack_react-query.js?v=18d30565:536
+fetch @ @tanstack_react-query.js?v=18d30565:926
+executeFetch_fn @ @tanstack_react-query.js?v=18d30565:2211
+onSubscribe @ @tanstack_react-query.js?v=18d30565:1898
+subscribe @ @tanstack_react-query.js?v=18d30565:24
+(anonymous) @ @tanstack_react-query.js?v=18d30565:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=18d30565:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=18d30565:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=18d30565:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=18d30565:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=18d30565:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=18d30565:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=18d30565:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=18d30565:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=18d30565:19432
+commitRoot @ chunk-RPCDYKBN.js?v=18d30565:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=18d30565:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18718
+workLoop @ chunk-RPCDYKBN.js?v=18d30565:197
+flushWork @ chunk-RPCDYKBN.js?v=18d30565:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=18d30565:384Understand this error
+chunk-RPCDYKBN.js?v=18d30565:14032 The above error occurred in the <Controller> component:
+
+    at Controller (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-4BFJKWC4.js?v=18d30565:298:35)
+    at FormField (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/components/ui/form.tsx:33:6)
+    at div
+    at form
+    at FormProvider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-4BFJKWC4.js?v=18d30565:102:11)
+    at div
+    at _c9 (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/components/ui/card.tsx:114:12)
+    at div
+    at _c (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/components/ui/card.tsx:20:11)
+    at div
+    at https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-AXMZZQ2X.js?v=18d30565:42:13
+    at Presence (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-LUE5KDWX.js?v=18d30565:24:11)
+    at https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tabs.js?v=18d30565:176:13
+    at _c5 (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/components/ui/tabs.tsx:72:12)
+    at div
+    at https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-AXMZZQ2X.js?v=18d30565:42:13
+    at Provider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=18d30565:38:15)
+    at https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tabs.js?v=18d30565:54:7
+    at div
+    at div
+    at HRAttendance (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/pages/hr-attendance.tsx:86:21)
+    at ProtectedRoute (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/App.tsx?v=d7QtUUiFiSGm9QVQJe86L:63:38)
+    at component
+    at Route (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=18d30565:323:16)
+    at Switch (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=18d30565:379:17)
+    at AppRouter
+    at main
+    at div
+    at div
+    at div
+    at Provider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=18d30565:38:15)
+    at TooltipProvider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=18d30565:64:5)
+    at SidebarProvider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/components/ui/sidebar.tsx:59:3)
+    at AppLayout (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/App.tsx?v=d7QtUUiFiSGm9QVQJe86L:470:20)
+    at Provider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-OXZDJRWN.js?v=18d30565:38:15)
+    at TooltipProvider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=18d30565:64:5)
+    at AuthProvider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/lib/auth-context.tsx:20:32)
+    at ThemeProvider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/src/lib/theme-provider.tsx:20:33)
+    at QueryClientProvider (https://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=18d30565:2805:3)
+    at App
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+logCapturedError @ chunk-RPCDYKBN.js?v=18d30565:14032
+update.callback @ chunk-RPCDYKBN.js?v=18d30565:14052
+callCallback @ chunk-RPCDYKBN.js?v=18d30565:11248
+commitUpdateQueue @ chunk-RPCDYKBN.js?v=18d30565:11265
+commitLayoutEffectOnFiber @ chunk-RPCDYKBN.js?v=18d30565:17093
+commitLayoutMountEffects_complete @ chunk-RPCDYKBN.js?v=18d30565:17980
+commitLayoutEffects_begin @ chunk-RPCDYKBN.js?v=18d30565:17969
+commitLayoutEffects @ chunk-RPCDYKBN.js?v=18d30565:17920
+commitRootImpl @ chunk-RPCDYKBN.js?v=18d30565:19353
+commitRoot @ chunk-RPCDYKBN.js?v=18d30565:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=18d30565:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=18d30565:555
+flush @ @tanstack_react-query.js?v=18d30565:569
+batch @ @tanstack_react-query.js?v=18d30565:587
+dispatch_fn @ @tanstack_react-query.js?v=18d30565:996
+setData @ @tanstack_react-query.js?v=18d30565:696
+onSuccess @ @tanstack_react-query.js?v=18d30565:897
+resolve @ @tanstack_react-query.js?v=18d30565:456
+Promise.then
+run @ @tanstack_react-query.js?v=18d30565:498
+start @ @tanstack_react-query.js?v=18d30565:536
+fetch @ @tanstack_react-query.js?v=18d30565:926
+executeFetch_fn @ @tanstack_react-query.js?v=18d30565:2211
+onSubscribe @ @tanstack_react-query.js?v=18d30565:1898
+subscribe @ @tanstack_react-query.js?v=18d30565:24
+(anonymous) @ @tanstack_react-query.js?v=18d30565:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=18d30565:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=18d30565:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=18d30565:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=18d30565:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=18d30565:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=18d30565:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=18d30565:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=18d30565:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=18d30565:19432
+commitRoot @ chunk-RPCDYKBN.js?v=18d30565:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=18d30565:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18718
+workLoop @ chunk-RPCDYKBN.js?v=18d30565:197
+flushWork @ chunk-RPCDYKBN.js?v=18d30565:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=18d30565:384Understand this error
+chunk-RPCDYKBN.js?v=18d30565:9129 Uncaught TypeError: Cannot read properties of undefined (reading 'fullName')
+    at hr-attendance.tsx:404:47
+    at Array.map (<anonymous>)
+    at Object.render (hr-attendance.tsx:402:45)
+    at Controller (chunk-4BFJKWC4.js?v=18d30565:298:35)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=18d30565:11548:26)
+    at updateFunctionComponent (chunk-RPCDYKBN.js?v=18d30565:14582:28)
+    at beginWork (chunk-RPCDYKBN.js?v=18d30565:15924:22)
+    at beginWork$1 (chunk-RPCDYKBN.js?v=18d30565:19753:22)
+    at performUnitOfWork (chunk-RPCDYKBN.js?v=18d30565:19198:20)
+    at workLoopSync (chunk-RPCDYKBN.js?v=18d30565:19137:13)
+(anonymous) @ hr-attendance.tsx:404
+render @ hr-attendance.tsx:402
+Controller @ chunk-4BFJKWC4.js?v=18d30565:298
+renderWithHooks @ chunk-RPCDYKBN.js?v=18d30565:11548
+updateFunctionComponent @ chunk-RPCDYKBN.js?v=18d30565:14582
+beginWork @ chunk-RPCDYKBN.js?v=18d30565:15924
+beginWork$1 @ chunk-RPCDYKBN.js?v=18d30565:19753
+performUnitOfWork @ chunk-RPCDYKBN.js?v=18d30565:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=18d30565:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=18d30565:19116
+recoverFromConcurrentError @ chunk-RPCDYKBN.js?v=18d30565:18736
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18879
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=18d30565:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=18d30565:555
+flush @ @tanstack_react-query.js?v=18d30565:569
+batch @ @tanstack_react-query.js?v=18d30565:587
+dispatch_fn @ @tanstack_react-query.js?v=18d30565:996
+setData @ @tanstack_react-query.js?v=18d30565:696
+onSuccess @ @tanstack_react-query.js?v=18d30565:897
+resolve @ @tanstack_react-query.js?v=18d30565:456
+Promise.then
+run @ @tanstack_react-query.js?v=18d30565:498
+start @ @tanstack_react-query.js?v=18d30565:536
+fetch @ @tanstack_react-query.js?v=18d30565:926
+executeFetch_fn @ @tanstack_react-query.js?v=18d30565:2211
+onSubscribe @ @tanstack_react-query.js?v=18d30565:1898
+subscribe @ @tanstack_react-query.js?v=18d30565:24
+(anonymous) @ @tanstack_react-query.js?v=18d30565:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=18d30565:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=18d30565:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=18d30565:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=18d30565:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=18d30565:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=18d30565:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=18d30565:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=18d30565:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=18d30565:19432
+commitRoot @ chunk-RPCDYKBN.js?v=18d30565:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=18d30565:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18718
+workLoop @ chunk-RPCDYKBN.js?v=18d30565:197
+flushWork @ chunk-RPCDYKBN.js?v=18d30565:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=18d30565:384Understand this error
+notification-bell.tsx:118 WebSocket connection to 'wss://73c1bb9c-b51b-423b-8795-1d2571b7fcbd-00-7s51nbmfmtrp.kirk.replit.dev/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJlYzc0MzQ0YS0xNzJiLTQ2YjQtYjdkOS03OGU4MjU0MDc4ODkiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NjM4ODQ5MDksImV4cCI6MTc2NDQ4OTcwOX0.IGM4q02L-I20CqLkkP4Slqj8PDi8l7mULa7K1-uJDCs' failed: WebSocket is closed before the connection is established.
+(anonymous) @ notification-bell.tsx:118
+safelyCallDestroy @ chunk-RPCDYKBN.js?v=18d30565:16748
+commitHookEffectListUnmount @ chunk-RPCDYKBN.js?v=18d30565:16875
+commitPassiveUnmountInsideDeletedTreeOnFiber @ chunk-RPCDYKBN.js?v=18d30565:18283
+commitPassiveUnmountEffectsInsideOfDeletedTree_begin @ chunk-RPCDYKBN.js?v=18d30565:18245
+commitPassiveUnmountEffects_begin @ chunk-RPCDYKBN.js?v=18d30565:18181
+commitPassiveUnmountEffects @ chunk-RPCDYKBN.js?v=18d30565:18169
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=18d30565:19489
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=18d30565:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=18d30565:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=18d30565:555
+flush @ @tanstack_react-query.js?v=18d30565:569
+batch @ @tanstack_react-query.js?v=18d30565:587
+dispatch_fn @ @tanstack_react-query.js?v=18d30565:996
+setData @ @tanstack_react-query.js?v=18d30565:696
+onSuccess @ @tanstack_react-query.js?v=18d30565:897
+resolve @ @tanstack_react-query.js?v=18d30565:456
+Promise.then
+run @ @tanstack_react-query.js?v=18d30565:498
+start @ @tanstack_react-query.js?v=18d30565:536
+fetch @ @tanstack_react-query.js?v=18d30565:926
+executeFetch_fn @ @tanstack_react-query.js?v=18d30565:2211
+onSubscribe @ @tanstack_react-query.js?v=18d30565:1898
+subscribe @ @tanstack_react-query.js?v=18d30565:24
+(anonymous) @ @tanstack_react-query.js?v=18d30565:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=18d30565:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=18d30565:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=18d30565:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=18d30565:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=18d30565:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=18d30565:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=18d30565:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=18d30565:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=18d30565:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=18d30565:19432
+commitRoot @ chunk-RPCDYKBN.js?v=18d30565:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=18d30565:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=18d30565:18718
+workLoop @ chunk-RPCDYKBN.js?v=18d30565:197
+flushWork @ chunk-RPCDYKBN.js?v=18d30565:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=18d30565:384Understand this warning
+notification-bell.tsx:107 Notification Bell: WebSocket error: Event {isTrusted: true, type: 'error', target: WebSocket, currentTarget: WebSocket, eventPhase: 2, …}
+ws.onerror @ notification-bell.tsx:107Understand this error
+notification-bell.tsx:92 Notification Bell: WebSocket closed
+notification-bell.tsx:98 Notification Bell: Reconnecting in 1000ms (attempt 1/5)
+notification-bell.tsx:67 Notification Bell: Connecting to WebSocket
+notification-bell.tsx:72 Notification Bell: WebSocket connected -- 

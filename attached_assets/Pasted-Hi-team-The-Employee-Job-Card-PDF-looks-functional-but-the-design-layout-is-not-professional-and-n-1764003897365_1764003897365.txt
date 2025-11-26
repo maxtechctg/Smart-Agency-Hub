@@ -1,0 +1,93 @@
+Hi team,
+The Employee Job Card PDF looks functional, but the design/layout is not professional and needs correction. Here are the issues I am facing:
+
+🔴 Current Problems
+
+Header section overlapping
+
+Company details and “Employee Job Card” block collide
+
+The generated date/time also overlaps or breaks layout
+
+No proper alignment or spacing
+
+No clean professional structure
+
+Header, body and table spacing inconsistent
+
+Typography and color hierarchy not corporate level
+
+The right-side header block looks random and not formatted
+
+Company Branding Missing / Weak
+
+Company logo missing
+
+Company header not aligned centrally
+
+Should look like a standard corporate HR report
+
+PDF not following standard HR Report guidelines
+
+No box-style header
+
+No section dividers
+
+Title section should be bold + centered
+
+Summary cards alignment could be more polished
+
+🟢 What I Need You to Do
+
+Please redesign the entire Employee Job Card PDF to make it look like a professional, standard HR document:
+
+✔ Required Design Updates
+
+Add company logo on top-left
+
+Add company name + address centered under the logo
+
+Move “Employee Job Card” block to top-right inside a neat box
+
+Proper spacing around the header (top margin 20–30px)
+
+Use a clean grid for Attendance Summary
+
+Align all summary boxes evenly
+
+Add professional borders + grey background where needed
+
+Make the date range + generated date appear clean and aligned
+
+Fix spacing between sections (header → employee info → summary → table)
+
+Add subtle line separators
+
+Use consistent text size (e.g., 12px body, 14px labels, 18px titles)
+
+✔ Example Corporate Layout I Want
+
+Top Section:
+Logo (left) — Company Info (center) — Job Card Info (right)
+
+Employee Info Box:
+Full-width light grey box with padding
+
+Summary Cards:
+Evenly spaced 6 cards with light border + colored numbers
+
+Attendance Table:
+Proper lines, alternating row shading, clean fonts
+
+Footer:
+Center: “MaxTech BD | Smart Agency Control Hub”
+Below: “Developed by MaxTech BD IT Team”
+
+🟢 Goal
+
+I want the job card to look fully professional, clean, aligned, and suitable for HR documentation, client submission, and employee records.
+
+Please fix the layout and styling accordingly.
+
+Thanks.
+Farid

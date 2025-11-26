@@ -1,0 +1,127 @@
+Hi Replit Team,
+I need your help to fully redesign the Employee Job Card PDF. Right now the PDF layout is not professional — alignment, branding, spacing, and formatting all need improvement.
+
+Below are my exact requirements.
+Please implement the full redesign exactly as written:
+
+✅ 1. Header Section (Top of PDF)
+
+Please add a full professional header with three sections:
+
+Left Side (Logo)
+
+Place the company logo
+
+Keep proper size and alignment
+
+Add margin from top/left
+
+Center (Company Details)
+
+Add the following text, center aligned:
+
+MAXTECH BD
+522, SK Mujib Road (4th Floor), Agrabad, Double Mooring, Chattogram
+Phone: +8801843180008
+Email: support@maxtechbd.com
+
+Use bold for the company name.
+
+Right Side
+Employee Job Card
+Period: Oct 25, 2025 – Nov 24, 2025
+Generated on: {currentDateTime}
+
+✅ 2. Employee Info Panel
+
+Create a clean, boxed layout showing:
+
+Employee Name
+
+Employee Code
+
+Department
+
+Use proper spacing, border, and left-aligned text.
+
+✅ 3. Attendance Summary (Professional Grid Layout)
+
+Create an 8-item grid (4 columns × 2 rows):
+
+Working Days
+
+Present
+
+On-Time
+
+Late
+
+Half-Day
+
+Absent
+
+Total Hours
+
+Overtime
+
+✔ Values should be bold
+✔ Use color coding (green, red, orange, purple)
+✔ Add background #f9f9f9 and soft border
+
+✅ 4. Daily Attendance Table (Corporate Style)
+
+Please fix the table:
+
+Add proper table borders
+
+Header row background: #f5f5f5
+
+Date and Day left aligned
+
+Hours right aligned
+
+Status bold
+
+Add row striping (optional)
+
+Columns:
+
+| Date | Day | Check In | Check Out | Status | Hours |
+
+✅ 5. Footer (With Branding)
+
+Add this at bottom, centered:
+
+MaxTech BD | Smart Agency Control Hub
+Developed by MaxTech BD IT Team
+
+✅ 6. PDF Formatting Requirements
+
+Page margin: 25px
+
+Font: Inter / Roboto
+
+Proper spacing around sections
+
+Clean alignment
+
+Remove extra white spaces
+
+Make layout consistent and balanced like corporate HR reports
+
+✅ 7. Important
+
+Please ensure the Employee Dropdown also shows:
+
+EMP001 – Monsur
+(not “Unknown”)
+
+The job card header already shows the correct name — so only the dropdown text needs fixing.
+
+🎯 Goal
+
+I want the Employee Job Card PDF to look like a professional HR report with complete branding, alignment, and layout.
+
+Please redesign the full PDF according to these requirements.
+
+Thank you.

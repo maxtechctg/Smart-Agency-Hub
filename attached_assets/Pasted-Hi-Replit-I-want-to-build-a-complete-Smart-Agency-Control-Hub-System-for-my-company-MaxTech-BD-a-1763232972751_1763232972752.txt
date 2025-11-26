@@ -1,0 +1,173 @@
+Hi Replit 👋
+I want to build a complete Smart Agency Control Hub System for my company MaxTech BD, and also make the architecture flexible so that later it can work as a multi-tenant SaaS platform.
+
+🚀 Project Goal
+
+A complete all-in-one platform where our agency can manage:
+
+Leads & CRM
+
+Clients
+
+Projects & Tasks
+
+Team Communication
+
+File Management
+
+Staff Attendance
+
+Accounts, Income & Expenses
+
+Invoices & Payments
+
+Dashboard KPIs
+
+Notifications
+
+Audit Logs
+
+Later this system should support multiple agencies under separate subdomains (multi-tenant).
+
+🧱 Tech Stack
+
+Frontend: React + Vite + Tailwind
+Backend: Node.js (Express + TypeScript + Zod)
+Database: Supabase (Postgres + RLS + Auth + Storage)
+Auth: Supabase Auth + JWT
+Email: SMTP (info@maxtechbd.com
+)
+WhatsApp: Click-to-Chat (Cloud API later)
+Real-time: WebSocket (later)
+Automation-ready: n8n / Make.com (optional triggers)
+
+📦 Core Modules
+1) Auth & Role Management
+
+(Admin / Operational Head / Developer / Client)
+
+2) Lead & Client Management (CRM)
+3) Project & Task Management
+
+(Task assignment, checklist, progress, deadline)
+
+4) Internal Team Chat
+
+(Project-wise messaging)
+
+5) File Upload System
+
+(Supabase storage + signed URLs)
+
+6) Staff Attendance System
+
+Check-in / Check-out
+
+Late count
+
+Monthly report
+
+Optional fine rules
+
+Future expansion: Geo-location support
+
+7) Accounts & Finance
+
+Income entries
+
+Expense entries
+
+Category-wise tracking
+
+Total balance = Income – Expense
+
+Monthly/Weekly summaries
+
+Profit/Loss charts
+
+8) Invoice & Payment Tracker
+
+Create invoice
+
+Send invoice via email
+
+Payment status tracking
+
+Due reminders
+
+9) WhatsApp & Email Notification System
+
+(Task assigned → notify developer
+Invoice due → reminder
+Lead follow-up → automation)
+
+10) Dashboard with KPIs
+
+Leads, Clients, Tasks, Revenue, Expense, Balance, Attendance, etc.
+
+11) Audit Log
+
+(who did what & when)
+
+🧠 Advanced Suggestions (include in architecture)
+✔ Future Multi-Tenant SaaS Support
+
+Example: agency1.domain.com, agency2.domain.com
+
+✔ AI Integrations (later)
+
+AI Lead Qualifier
+
+AI Task Breakdown
+
+AI Email Writer
+
+✔ Developer Productivity Metrics
+
+Task completion time
+
+Accuracy
+
+Delay ratio
+
+✔ Client Portal Expansion
+
+Project status
+
+Milestones
+
+Chat
+
+Payment
+
+Files
+
+🗃 Database Tables
+
+users, leads, clients, projects, tasks, messages, files, invoices, payments, audit_logs, attendance, income, expenses, tenants (future).
+
+📆 7-Day Build Plan
+
+Day 1: Auth, roles, migrations
+Day 2: CRM (Lead + Client)
+Day 3: Projects & Tasks
+Day 4: Chat + File Upload
+Day 5: Accounts (income, expense, balance)
+Day 6: Attendance + Email/WhatsApp
+Day 7: Dashboard + Audit Logs
+
+🛠 Start Now — Initial Tasks for You
+
+Create the monorepo folder structure (client + server).
+
+Set up the Express backend in TypeScript with the schema above.
+
+Scaffold the React + Vite + Tailwind frontend with routing.
+
+Connect Supabase for Auth, Database, and Storage.
+
+Create base REST APIs for leads, projects, tasks, attendance, income, expenses.
+
+Provide instructions on required environment variables.
+
+Build everything step-by-step and ask me for any missing info.

@@ -1,0 +1,151 @@
+Hi Replit,
+
+I want to upgrade my system to a full Client Communication & Notification Portal so buyers can securely communicate with our assigned developers without accessing any sensitive information.
+
+Here is my complete requirement:
+
+🟦 1. Client Portal – How Buyers Will Use the System
+
+Please implement a proper Client Portal workflow:
+
+Client (Buyer) Should Be Able To:
+
+Login using a client account (created by admin)
+
+See only their own assigned projects (based on clientId)
+
+Open their project and use the built-in chat
+
+Send messages to the assigned developer in real time
+
+Upload files related to the project
+
+See project progress and assigned tasks (read-only)
+
+Change only their own password
+
+Client (Buyer) Must NOT See:
+
+Any other buyers
+
+Any other developers
+
+Any project other than their own
+
+Finance, invoices, payments
+
+Leads, clients list
+
+Team members
+
+Admin data
+
+HR & attendance
+
+Any sensitive information (email, phone, contract details, internal notes)
+
+Chat System Requirements:
+
+Buyer ↔ Assigned Developer only
+
+Admin can view all communication
+
+Each buyer has their own project/chat room
+
+Developer sees only assigned buyers
+
+🟦 2. Notification System (Very Important)
+
+I need a complete notification system for communication between buyers and developers.
+
+A. Email Notifications
+
+Send email automatically when:
+
+Buyer → Developer
+
+Buyer sends a new message
+
+Buyer uploads a file
+
+Buyer sends a new requirement
+
+Developer → Buyer
+
+Developer replies
+
+Developer uploads a file
+
+Developer marks a task as complete
+
+Developer requests approval
+
+B. In-App Real-Time Notifications
+
+Add a Notification Bell (🔔) in the dashboard
+
+Badge counter should show unread notifications
+
+Real-time updates via WebSocket
+
+Clicking the bell shows notification list
+
+C. Database Notification Table
+
+Store:
+
+userId
+
+type
+
+message
+
+projectId
+
+createdAt
+
+read/unread
+
+D. Developer Notification Rules
+
+Developer receives notification only for buyers assigned to them
+
+Developers cannot see other buyers’ notifications
+
+E. Client Notification Rules
+
+Buyer receives notification only for their own project
+
+Buyer should NOT see any internal notifications
+
+🟦 3. Security Rules (Important)
+
+Developers should not see any client contract details, phone, email, payment, or sensitive data
+
+Clients should only see their assigned project
+
+WebSocket must enforce project-specific access
+
+All chat and file actions must validate project ownership
+
+Admin has global access to everything
+
+🟦 4. Deliverables Needed
+
+Client Portal UI
+
+Buyer–Developer private chat system with role restrictions
+
+Real-time in-app notifications via WebSocket
+
+Email notifications for all key events
+
+Notification Bell with unread count
+
+Database notification model
+
+Full security enforcement for clients and developers
+
+Please start building this entire communication + notification system based on my requirements.
+
+Let me know when you begin.
