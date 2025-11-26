@@ -63,6 +63,44 @@ export const leadEmails = pgTable("lead_emails", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const DEFAULT_LEAD_CATEGORIES = [
+  "Software Company",
+  "Garments",
+  "Buying House",
+  "Marketing Agency",
+  "School / College",
+  "Restaurant",
+  "Hospital / Clinic",
+  "Real Estate",
+  "E-commerce",
+  "Manufacturing",
+  "IT Services",
+  "Consulting",
+  "Retail",
+  "Other",
+] as const;
+
+export const leadCategories = pgTable("lead_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  color: text("color").default("#6366f1"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const leadMessageHistory = pgTable("lead_message_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  leadId: varchar("lead_id").references(() => leads.id).notNull(),
+  subject: text("subject").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("sent"),
+  sentBy: varchar("sent_by").references(() => users.id).notNull(),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const clients = pgTable("clients", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -448,6 +486,25 @@ export const insertLeadEmailSchema = createInsertSchema(leadEmails).omit({
   status: true,
 });
 
+export const insertLeadCategorySchema = createInsertSchema(leadCategories).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertLeadMessageHistorySchema = createInsertSchema(leadMessageHistory).omit({
+  id: true,
+  createdAt: true,
+  sentAt: true,
+  errorMessage: true,
+  status: true,
+});
+
+export const bulkEmailSchema = z.object({
+  leadIds: z.array(z.string()).min(1, "Select at least one lead"),
+  subject: z.string().min(1, "Subject is required"),
+  message: z.string().min(1, "Message is required"),
+});
+
 export const insertClientSchema = createInsertSchema(clients).omit({
   id: true,
   createdAt: true,
@@ -683,6 +740,14 @@ export type Lead = typeof leads.$inferSelect;
 
 export type InsertLeadEmail = z.infer<typeof insertLeadEmailSchema>;
 export type LeadEmail = typeof leadEmails.$inferSelect;
+
+export type InsertLeadCategory = z.infer<typeof insertLeadCategorySchema>;
+export type LeadCategory = typeof leadCategories.$inferSelect;
+
+export type InsertLeadMessageHistory = z.infer<typeof insertLeadMessageHistorySchema>;
+export type LeadMessageHistory = typeof leadMessageHistory.$inferSelect;
+
+export type BulkEmailInput = z.infer<typeof bulkEmailSchema>;
 
 export type InsertClient = z.infer<typeof insertClientSchema>;
 export type Client = typeof clients.$inferSelect;

@@ -36,9 +36,10 @@ import {
 } from "@/components/ui/collapsible";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-import { useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import type { LeadCategory } from "@shared/schema";
 
 interface BusinessResult {
   name: string;
@@ -77,23 +78,34 @@ interface SmartLeadFinderProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const BUSINESS_CATEGORIES = [
-  "IT & Technology",
-  "Marketing & Advertising",
+const DEFAULT_CATEGORIES = [
+  "Software Company",
+  "Garments",
+  "Buying House",
+  "Marketing Agency",
+  "School / College",
+  "Restaurant",
+  "Hospital / Clinic",
   "Real Estate",
-  "Healthcare",
-  "Education",
-  "Finance & Banking",
-  "Construction",
-  "Retail & E-commerce",
-  "Hospitality & Tourism",
+  "E-commerce",
   "Manufacturing",
-  "Professional Services",
+  "IT Services",
+  "Consulting",
+  "Retail",
   "Other",
 ];
 
 export function SmartLeadFinder({ open, onOpenChange }: SmartLeadFinderProps) {
   const { toast } = useToast();
+  
+  const { data: dbCategories = [] } = useQuery<LeadCategory[]>({
+    queryKey: ["/api/lead-categories"],
+    enabled: open,
+  });
+  
+  const categories = dbCategories.length > 0 
+    ? dbCategories.filter(c => c.isActive).map(c => c.name)
+    : DEFAULT_CATEGORIES;
   const [keyword, setKeyword] = useState("");
   const [location, setLocation] = useState("");
   const [results, setResults] = useState<BusinessResult[]>([]);
@@ -394,7 +406,7 @@ export function SmartLeadFinder({ open, onOpenChange }: SmartLeadFinderProps) {
                           <SelectValue placeholder="Select a category" />
                         </SelectTrigger>
                         <SelectContent>
-                          {BUSINESS_CATEGORIES.map((cat) => (
+                          {categories.map((cat) => (
                             <SelectItem key={cat} value={cat} data-testid={`option-category-${cat}`}>
                               {cat}
                             </SelectItem>

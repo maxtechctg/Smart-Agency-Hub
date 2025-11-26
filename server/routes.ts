@@ -8,6 +8,8 @@ import {
   users,
   leads,
   leadEmails,
+  leadCategories,
+  leadMessageHistory,
   clients,
   projects,
   tasks,
@@ -32,6 +34,8 @@ import {
   insertUserSchema,
   insertLeadSchema,
   insertLeadEmailSchema,
+  insertLeadCategorySchema,
+  bulkEmailSchema,
   insertClientSchema,
   insertProjectSchema,
   insertTaskSchema,
@@ -45,6 +49,7 @@ import {
   insertPaymentSchema,
   insertNotificationSchema,
   LEAD_EMAIL_TEMPLATES,
+  DEFAULT_LEAD_CATEGORIES,
 } from "@shared/schema";
 import { authenticateToken, generateToken, type AuthRequest } from "./middleware/auth";
 import { auditLog, auditMiddleware } from "./middleware/audit";
@@ -519,7 +524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const { search, status, source } = req.query;
+      const { search, status, source, category } = req.query;
 
       // Build dynamic where conditions
       const conditions = [];
@@ -534,6 +539,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (source && typeof source === "string") {
         conditions.push(eq(leads.source, source));
+      }
+      
+      if (category && typeof category === "string") {
+        conditions.push(eq(leads.category, category));
       }
 
       // Apply filters if any, otherwise get all leads
@@ -947,6 +956,214 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to import leads" });
+    }
+  });
+
+  // Lead Categories
+  app.get("/api/lead-categories", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Only admin and operational_head can access lead categories
+      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const categories = await db.select().from(leadCategories).orderBy(asc(leadCategories.name));
+      res.json(categories);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/lead-categories", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Only admin can create categories
+      if (req.userRole !== "admin") {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const data = insertLeadCategorySchema.parse(req.body);
+      const [category] = await db.insert(leadCategories).values(data).returning();
+      res.json(category);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/lead-categories/seed", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Only admin can seed categories
+      if (req.userRole !== "admin") {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Check if any categories exist
+      const existing = await db.select().from(leadCategories).limit(1);
+      if (existing.length > 0) {
+        return res.status(400).json({ error: "Categories already exist. Use the add category feature instead." });
+      }
+
+      // Seed default categories
+      const categories = [];
+      for (const name of DEFAULT_LEAD_CATEGORIES) {
+        const [category] = await db.insert(leadCategories).values({
+          name,
+          isActive: true,
+        }).returning();
+        categories.push(category);
+      }
+
+      res.json({ message: `Created ${categories.length} default categories`, categories });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/lead-categories/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Only admin can update categories
+      if (req.userRole !== "admin") {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const data = insertLeadCategorySchema.partial().parse(req.body);
+      const [category] = await db.update(leadCategories).set(data).where(eq(leadCategories.id, req.params.id)).returning();
+      res.json(category);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/lead-categories/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Only admin can delete categories
+      if (req.userRole !== "admin") {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      await db.delete(leadCategories).where(eq(leadCategories.id, req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Bulk Email to Leads
+  app.post("/api/leads/bulk-email", authenticateToken, auditMiddleware("create", "lead_email"), async (req: AuthRequest, res) => {
+    try {
+      // Only admin and operational_head can send bulk emails
+      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { leadIds, subject, message } = bulkEmailSchema.parse(req.body);
+
+      // Get leads with email addresses
+      const leadsToEmail = await db.select().from(leads).where(inArray(leads.id, leadIds));
+      
+      const results = {
+        success: 0,
+        failed: 0,
+        skipped: 0,
+        errors: [] as { name: string; error: string }[],
+        sent: [] as { leadId: string; name: string; email: string }[],
+      };
+
+      for (const lead of leadsToEmail) {
+        try {
+          if (!lead.email) {
+            results.skipped++;
+            results.errors.push({ name: lead.name, error: "No email address" });
+            continue;
+          }
+
+          // Send email
+          const emailResult = await emailService.sendEmail({
+            to: lead.email,
+            subject: subject,
+            text: message,
+            html: `<div style="font-family: Arial, sans-serif; line-height: 1.6;">
+              ${message.split('\n').map(line => `<p>${line}</p>`).join('')}
+              <hr style="border: 1px solid #eee; margin-top: 30px;">
+              <p style="color: #666; font-size: 12px;">This email was sent by MaxTech BD</p>
+            </div>`,
+          });
+
+          if (emailResult.success) {
+            // Save to message history
+            await db.insert(leadMessageHistory).values({
+              leadId: lead.id,
+              subject,
+              message,
+              status: "sent",
+              sentBy: req.userId!,
+            });
+
+            results.success++;
+            results.sent.push({ leadId: lead.id, name: lead.name, email: lead.email });
+          } else {
+            // Save failed attempt to history
+            await db.insert(leadMessageHistory).values({
+              leadId: lead.id,
+              subject,
+              message,
+              status: "failed",
+              sentBy: req.userId!,
+              errorMessage: emailResult.error,
+            });
+
+            results.failed++;
+            results.errors.push({ name: lead.name, error: emailResult.error || "Failed to send" });
+          }
+        } catch (err: any) {
+          results.failed++;
+          results.errors.push({ name: lead.name, error: err.message || "Unknown error" });
+        }
+      }
+
+      const statusMessage = [
+        `Sent ${results.success} email(s) successfully`,
+        results.skipped > 0 ? `${results.skipped} skipped (no email)` : "",
+        results.failed > 0 ? `${results.failed} failed` : ""
+      ].filter(Boolean).join(", ");
+
+      res.json({
+        message: statusMessage,
+        success: results.success,
+        skipped: results.skipped,
+        failed: results.failed,
+        errors: results.errors,
+        sent: results.sent,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send bulk emails" });
+    }
+  });
+
+  // Get message history for a lead
+  app.get("/api/leads/:id/messages", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Only admin and operational_head can view message history
+      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const messages = await db.select({
+        id: leadMessageHistory.id,
+        subject: leadMessageHistory.subject,
+        message: leadMessageHistory.message,
+        status: leadMessageHistory.status,
+        sentAt: leadMessageHistory.sentAt,
+        errorMessage: leadMessageHistory.errorMessage,
+        sentBy: users.fullName,
+      })
+        .from(leadMessageHistory)
+        .leftJoin(users, eq(leadMessageHistory.sentBy, users.id))
+        .where(eq(leadMessageHistory.leadId, req.params.id))
+        .orderBy(desc(leadMessageHistory.sentAt));
+
+      res.json(messages);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 

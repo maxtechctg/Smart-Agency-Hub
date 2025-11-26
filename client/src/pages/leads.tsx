@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -133,6 +134,14 @@ export default function Leads() {
 
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  
+  // Bulk selection states
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  const [bulkMessageOpen, setBulkMessageOpen] = useState(false);
+  const [bulkMessageSubject, setBulkMessageSubject] = useState("");
+  const [bulkMessageContent, setBulkMessageContent] = useState("");
+  const [isSendingBulk, setIsSendingBulk] = useState(false);
 
   // Bulk upload states
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
@@ -170,10 +179,18 @@ export default function Leads() {
     setSearchQuery(searchInput);
   };
 
+  // Fetch categories from database
+  const { data: categories = [] } = useQuery<{ id: number; name: string; isActive: boolean }[]>({
+    queryKey: ["/api/lead-categories"],
+  });
+  
+  const activeCategories = categories.filter(c => c.isActive);
+
   const queryParams = new URLSearchParams();
   if (searchQuery.trim()) queryParams.append("search", searchQuery);
   if (statusFilter.trim()) queryParams.append("status", statusFilter);
   if (sourceFilter.trim()) queryParams.append("source", sourceFilter);
+  if (categoryFilter.trim()) queryParams.append("category", categoryFilter);
 
   const queryString = queryParams.toString();
 
@@ -614,8 +631,29 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 ))}
               </SelectContent>
             </Select>
+            
+            {/* Category */}
+            <Select
+              value={categoryFilter || ALL_SENTINEL}
+              onValueChange={(v) =>
+                setCategoryFilter(v === ALL_SENTINEL ? "" : v)
+              }
+              data-testid="select-category-filter"
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Filter by category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_SENTINEL}>All Categories</SelectItem>
+                {activeCategories.map((c) => (
+                  <SelectItem key={c.id} value={c.name}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-            {(statusFilter || sourceFilter || searchQuery) && (
+            {(statusFilter || sourceFilter || searchQuery || categoryFilter) && (
               <Button
                 variant="outline"
                 onClick={() => {
@@ -623,6 +661,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                   setSearchQuery("");
                   setStatusFilter("");
                   setSourceFilter("");
+                  setCategoryFilter("");
                 }}
               >
                 Clear All
@@ -794,78 +833,149 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
         </DialogContent>
       </Dialog>
 
+      {/* Bulk Selection Bar */}
+      {selectedLeadIds.size > 0 && (
+        <Card className="mb-4 border-primary">
+          <CardContent className="p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <Badge variant="secondary" data-testid="text-selected-count">
+                {selectedLeadIds.size} lead{selectedLeadIds.size !== 1 ? 's' : ''} selected
+              </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedLeadIds(new Set())}
+                data-testid="button-clear-selection"
+              >
+                Clear Selection
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const allIds = new Set(leads.map(l => l.id));
+                  setSelectedLeadIds(allIds);
+                }}
+                data-testid="button-select-all"
+              >
+                Select All ({leads.length})
+              </Button>
+            </div>
+            <Button
+              onClick={() => setBulkMessageOpen(true)}
+              data-testid="button-bulk-message"
+            >
+              <Send className="w-4 h-4 mr-2" />
+              Send Bulk Message
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* LEADS LIST */}
       {isLoading ? (
         <p>Loading...</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {leads.map((lead) => (
-            <Card
-              key={lead.id}
-              className="relative cursor-pointer hover:shadow-lg"
-              onClick={() => handleEdit(lead)}
-              data-testid={`card-lead-${lead.id}`}
-            >
-              {/* ACTION BUTTONS */}
-              <div className="absolute top-2 right-2 flex gap-1 z-10">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openEmailDialog(lead);
-                  }}
-                  title="Send Email"
-                  data-testid={`button-email-${lead.id}`}
-                  className="bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40"
+          {leads.map((lead) => {
+            const leadId = lead.id;
+            const isSelected = selectedLeadIds.has(leadId);
+            
+            return (
+              <Card
+                key={lead.id}
+                className={`relative cursor-pointer hover:shadow-lg ${isSelected ? 'ring-2 ring-primary' : ''}`}
+                onClick={() => handleEdit(lead)}
+                data-testid={`card-lead-${lead.id}`}
+              >
+                {/* CHECKBOX */}
+                <div 
+                  className="absolute top-2 left-2 z-10"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <Send className="w-4 h-4 text-blue-600" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(lead.id);
-                  }}
-                  title="Delete Lead"
-                  data-testid={`button-delete-${lead.id}`}
-                  className="bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40"
-                >
-                  <Trash className="w-4 h-4 text-red-600" />
-                </Button>
-              </div>
-
-              <CardContent className="p-6 space-y-2">
-                <h3 className="font-bold text-lg">{lead.name}</h3>
-                <Badge className={statusColor(lead.status)}>
-                  {lead.status}
-                </Badge>
-
-                <div className="text-sm space-y-1">
-                  <div className="flex gap-2 items-center">
-                    <Mail className="w-4 h-4" />
-                    {lead.email}
-                  </div>
-
-                  <div className="flex gap-2 items-center">
-                    <Phone className="w-4 h-4" />
-                    {lead.phone}
-                  </div>
-
-                  <div className="flex gap-2 items-center">
-                    <Calendar className="w-4 h-4" />
-                    Follow-up:{" "}
-                    {new Date(lead.followUpDate).toLocaleDateString()}
-                  </div>
-
-                  <p className="text-xs text-muted-foreground">
-                    Source: {lead.source}
-                  </p>
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={(checked) => {
+                      const newSet = new Set(selectedLeadIds);
+                      if (checked) {
+                        newSet.add(leadId);
+                      } else {
+                        newSet.delete(leadId);
+                      }
+                      setSelectedLeadIds(newSet);
+                    }}
+                    data-testid={`checkbox-lead-${lead.id}`}
+                  />
                 </div>
-              </CardContent>
-            </Card>
-          ))}
+                
+                {/* ACTION BUTTONS */}
+                <div className="absolute top-2 right-2 flex gap-1 z-10">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEmailDialog(lead);
+                    }}
+                    title="Send Email"
+                    data-testid={`button-email-${lead.id}`}
+                    className="bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40"
+                  >
+                    <Send className="w-4 h-4 text-blue-600" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(lead.id);
+                    }}
+                    title="Delete Lead"
+                    data-testid={`button-delete-${lead.id}`}
+                    className="bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40"
+                  >
+                    <Trash className="w-4 h-4 text-red-600" />
+                  </Button>
+                </div>
+
+                <CardContent className="p-6 pt-10 space-y-2">
+                  <h3 className="font-bold text-lg">{lead.name}</h3>
+                  <div className="flex flex-wrap gap-1">
+                    <Badge className={statusColor(lead.status)}>
+                      {lead.status}
+                    </Badge>
+                    {lead.category && (
+                      <Badge variant="outline" data-testid={`badge-category-${lead.id}`}>
+                        {lead.category}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="text-sm space-y-1">
+                    <div className="flex gap-2 items-center">
+                      <Mail className="w-4 h-4" />
+                      {lead.email}
+                    </div>
+
+                    <div className="flex gap-2 items-center">
+                      <Phone className="w-4 h-4" />
+                      {lead.phone}
+                    </div>
+
+                    <div className="flex gap-2 items-center">
+                      <Calendar className="w-4 h-4" />
+                      Follow-up:{" "}
+                      {new Date(lead.followUpDate).toLocaleDateString()}
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Source: {lead.source}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -1134,6 +1244,155 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
             <Button variant="outline" onClick={() => setEmailDialogOpen(false)} data-testid="button-close-email-dialog">
               Close
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Bulk Message Composer Dialog */}
+      <Dialog open={bulkMessageOpen} onOpenChange={(open) => {
+        setBulkMessageOpen(open);
+        if (!open) {
+          setBulkMessageSubject("");
+          setBulkMessageContent("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="w-5 h-5" />
+              Send Bulk Message
+            </DialogTitle>
+            <DialogDescription>
+              Send a promotional email to {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {/* Recipients Preview */}
+            <div>
+              <label className="text-sm font-medium">Recipients</label>
+              <div className="mt-2 p-3 bg-muted rounded-md max-h-24 overflow-y-auto">
+                <div className="flex flex-wrap gap-1">
+                  {Array.from(selectedLeadIds).slice(0, 10).map((id) => {
+                    const lead = leads.find(l => l.id === id);
+                    return lead ? (
+                      <Badge key={id} variant="outline" className="text-xs">
+                        {lead.name}
+                      </Badge>
+                    ) : null;
+                  })}
+                  {selectedLeadIds.size > 10 && (
+                    <Badge variant="secondary" className="text-xs">
+                      +{selectedLeadIds.size - 10} more
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            {/* Subject */}
+            <div>
+              <label className="text-sm font-medium">Subject</label>
+              <Input
+                value={bulkMessageSubject}
+                onChange={(e) => setBulkMessageSubject(e.target.value)}
+                placeholder="Enter email subject..."
+                className="mt-2"
+                data-testid="input-bulk-subject"
+              />
+            </div>
+            
+            {/* Message Content */}
+            <div>
+              <label className="text-sm font-medium">Message</label>
+              <Textarea
+                value={bulkMessageContent}
+                onChange={(e) => setBulkMessageContent(e.target.value)}
+                placeholder="Enter your promotional message..."
+                className="mt-2 min-h-[200px]"
+                data-testid="input-bulk-message"
+              />
+              <p className="text-xs text-muted-foreground mt-2">
+                Use {"{name}"} to personalize the message with the recipient's name.
+              </p>
+            </div>
+            
+            {/* Actions */}
+            <div className="flex justify-end gap-2 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setBulkMessageOpen(false)}
+                disabled={isSendingBulk}
+                data-testid="button-cancel-bulk"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!bulkMessageSubject.trim() || !bulkMessageContent.trim()) {
+                    toast({
+                      title: "Missing Information",
+                      description: "Please enter both subject and message content.",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  
+                  setIsSendingBulk(true);
+                  try {
+                    const selectedLeads = leads.filter(l => selectedLeadIds.has(l.id));
+                    const leadIds = selectedLeads.map(l => l.id);
+                    
+                    const response = await apiRequest("POST", "/api/leads/bulk-message", {
+                      leadIds,
+                      subject: bulkMessageSubject,
+                      content: bulkMessageContent,
+                    });
+                    
+                    const result = response as { success: number; failed: number; errors: string[] };
+                    
+                    if (result.success > 0) {
+                      toast({
+                        title: "Bulk Message Sent",
+                        description: `Successfully sent to ${result.success} recipient${result.success !== 1 ? 's' : ''}${result.failed > 0 ? `. ${result.failed} failed.` : ''}`,
+                      });
+                      setBulkMessageOpen(false);
+                      setSelectedLeadIds(new Set());
+                      setBulkMessageSubject("");
+                      setBulkMessageContent("");
+                    } else {
+                      toast({
+                        title: "Send Failed",
+                        description: result.errors.join(", ") || "Failed to send messages",
+                        variant: "destructive",
+                      });
+                    }
+                  } catch (error: any) {
+                    toast({
+                      title: "Error",
+                      description: error.message || "Failed to send bulk message",
+                      variant: "destructive",
+                    });
+                  } finally {
+                    setIsSendingBulk(false);
+                  }
+                }}
+                disabled={isSendingBulk || !bulkMessageSubject.trim() || !bulkMessageContent.trim()}
+                data-testid="button-send-bulk"
+              >
+                {isSendingBulk ? (
+                  <span className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 animate-spin" />
+                    Sending...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <Send className="w-4 h-4" />
+                    Send to {selectedLeadIds.size} Lead{selectedLeadIds.size !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
