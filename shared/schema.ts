@@ -123,15 +123,6 @@ export const projects = pgTable("projects", {
   progress: integer("progress").default(0),
   createdBy: varchar("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-  // Video presentation links
-  shortVideoUrl: text("short_video_url"),          // Presentable Short Video (YouTube/Vimeo)
-  fullFeatureVideoUrl: text("full_feature_video_url"), // Full Software Feature Video
-  // Project credentials section
-  hostingLink: text("hosting_link"),               // Live hosting URL
-  adminLoginLink: text("admin_login_link"),        // Admin panel login URL
-  adminUsername: text("admin_username"),           // Admin username
-  adminPassword: text("admin_password"),           // Admin password (encrypted in production)
-  credentialsNotes: text("credentials_notes"),     // Additional notes about credentials
 });
 
 export const tasks = pgTable("tasks", {

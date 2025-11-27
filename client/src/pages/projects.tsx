@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Calendar, DollarSign, Video, Key, ExternalLink, Eye, EyeOff } from "lucide-react";
+import { Plus, Calendar, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -21,13 +20,6 @@ import { normalizeProjectData } from "@/lib/normalizeDateInputs";
 
 const projectFormSchema = insertProjectSchema.extend({
   deadline: z.string().optional(),
-  shortVideoUrl: z.string().optional(),
-  fullFeatureVideoUrl: z.string().optional(),
-  hostingLink: z.string().optional(),
-  adminLoginLink: z.string().optional(),
-  adminUsername: z.string().optional(),
-  adminPassword: z.string().optional(),
-  credentialsNotes: z.string().optional(),
 });
 
 type ProjectFormData = z.infer<typeof projectFormSchema>;
@@ -35,7 +27,6 @@ type ProjectFormData = z.infer<typeof projectFormSchema>;
 export default function Projects() {
   const [open, setOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [showPassword, setShowPassword] = useState(false);
   const { toast } = useToast();
   const { data: projects, isLoading } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
@@ -82,13 +73,6 @@ export default function Projects() {
       status: "planning",
       budget: "0",
       progress: 0,
-      shortVideoUrl: "",
-      fullFeatureVideoUrl: "",
-      hostingLink: "",
-      adminLoginLink: "",
-      adminUsername: "",
-      adminPassword: "",
-      credentialsNotes: "",
     },
   });
 
@@ -103,7 +87,6 @@ export default function Projects() {
 
   const handleEdit = (project: Project) => {
     setEditingProject(project);
-    setShowPassword(false);
     form.reset({
       clientId: project.clientId,
       name: project.name,
@@ -112,20 +95,12 @@ export default function Projects() {
       budget: project.budget || "0",
       progress: project.progress ?? 0,
       deadline: project.deadline ? (typeof project.deadline === 'string' ? project.deadline : new Date(project.deadline).toISOString().split('T')[0]) : "",
-      shortVideoUrl: (project as any).shortVideoUrl || "",
-      fullFeatureVideoUrl: (project as any).fullFeatureVideoUrl || "",
-      hostingLink: (project as any).hostingLink || "",
-      adminLoginLink: (project as any).adminLoginLink || "",
-      adminUsername: (project as any).adminUsername || "",
-      adminPassword: (project as any).adminPassword || "",
-      credentialsNotes: (project as any).credentialsNotes || "",
     });
     setOpen(true);
   };
 
   const handleAddNew = () => {
     setEditingProject(null);
-    setShowPassword(false);
     form.reset({
       clientId: "",
       name: "",
@@ -133,13 +108,6 @@ export default function Projects() {
       status: "planning",
       budget: "0",
       progress: 0,
-      shortVideoUrl: "",
-      fullFeatureVideoUrl: "",
-      hostingLink: "",
-      adminLoginLink: "",
-      adminUsername: "",
-      adminPassword: "",
-      credentialsNotes: "",
     });
     setOpen(true);
   };
@@ -185,7 +153,7 @@ export default function Projects() {
           Add Project
         </Button>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{editingProject ? "Edit Project" : "Add New Project"}</DialogTitle>
               <DialogDescription>
@@ -194,329 +162,108 @@ export default function Projects() {
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <Tabs defaultValue="details" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
-                    <TabsTrigger value="videos" data-testid="tab-videos">
-                      <Video className="w-4 h-4 mr-2" />
-                      Videos
-                    </TabsTrigger>
-                    <TabsTrigger value="credentials" data-testid="tab-credentials">
-                      <Key className="w-4 h-4 mr-2" />
-                      Credentials
-                    </TabsTrigger>
-                  </TabsList>
-                  
-                  <TabsContent value="details" className="space-y-4 mt-4">
-                    <FormField
-                      control={form.control}
-                      name="name"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Project Name</FormLabel>
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Project Name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Website Redesign" {...field} data-testid="input-name" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="clientId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Client</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
                           <FormControl>
-                            <Input placeholder="Website Redesign" {...field} data-testid="input-name" />
+                            <SelectTrigger data-testid="select-client">
+                              <SelectValue placeholder="Select client" />
+                            </SelectTrigger>
                           </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <FormField
-                        control={form.control}
-                        name="clientId"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Client</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                              <FormControl>
-                                <SelectTrigger data-testid="select-client">
-                                  <SelectValue placeholder="Select client" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent position="popper">
-                                {clients?.map((client) => (
-                                  <SelectItem key={client.id} value={client.id}>
-                                    {client.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="status"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Status</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                              <FormControl>
-                                <SelectTrigger data-testid="select-status">
-                                  <SelectValue />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent position="popper">
-                                <SelectItem value="planning">Planning</SelectItem>
-                                <SelectItem value="active">Active</SelectItem>
-                                <SelectItem value="on-hold">On Hold</SelectItem>
-                                <SelectItem value="completed">Completed</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="budget"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Budget</FormLabel>
-                            <FormControl>
-                              <Input type="number" placeholder="5000" {...field} value={field.value ?? ""} data-testid="input-budget" />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="deadline"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Deadline</FormLabel>
-                            <FormControl>
-                              <Input type="date" {...field} value={field.value ?? ""} data-testid="input-deadline" />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <FormField
-                      control={form.control}
-                      name="description"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Description</FormLabel>
+                          <SelectContent position="popper">
+                            {clients?.map((client) => (
+                              <SelectItem key={client.id} value={client.id}>
+                                {client.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="status"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Status</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
                           <FormControl>
-                            <Textarea placeholder="Project details..." {...field} value={field.value ?? ""} data-testid="input-description" />
+                            <SelectTrigger data-testid="select-status">
+                              <SelectValue />
+                            </SelectTrigger>
                           </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </TabsContent>
-                  
-                  <TabsContent value="videos" className="space-y-4 mt-4">
-                    <div className="text-sm text-muted-foreground mb-4">
-                      Add video presentation links for client review (YouTube, Vimeo, etc.)
-                    </div>
-                    <FormField
-                      control={form.control}
-                      name="shortVideoUrl"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Presentable Short Video</FormLabel>
-                          <FormControl>
-                            <div className="flex gap-2">
-                              <Input 
-                                placeholder="https://www.youtube.com/watch?v=..." 
-                                {...field} 
-                                value={field.value ?? ""} 
-                                data-testid="input-short-video" 
-                              />
-                              {field.value && (
-                                <Button 
-                                  type="button" 
-                                  variant="outline" 
-                                  size="icon"
-                                  onClick={() => window.open(field.value || '', '_blank')}
-                                  data-testid="button-open-short-video"
-                                >
-                                  <ExternalLink className="w-4 h-4" />
-                                </Button>
-                              )}
-                            </div>
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="fullFeatureVideoUrl"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Full Software Feature Video</FormLabel>
-                          <FormControl>
-                            <div className="flex gap-2">
-                              <Input 
-                                placeholder="https://www.youtube.com/watch?v=..." 
-                                {...field} 
-                                value={field.value ?? ""} 
-                                data-testid="input-full-video" 
-                              />
-                              {field.value && (
-                                <Button 
-                                  type="button" 
-                                  variant="outline" 
-                                  size="icon"
-                                  onClick={() => window.open(field.value || '', '_blank')}
-                                  data-testid="button-open-full-video"
-                                >
-                                  <ExternalLink className="w-4 h-4" />
-                                </Button>
-                              )}
-                            </div>
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </TabsContent>
-                  
-                  <TabsContent value="credentials" className="space-y-4 mt-4">
-                    <div className="text-sm text-muted-foreground mb-4">
-                      Store project hosting and admin access credentials securely
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <FormField
-                        control={form.control}
-                        name="hostingLink"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Hosting Link</FormLabel>
-                            <FormControl>
-                              <div className="flex gap-2">
-                                <Input 
-                                  placeholder="https://example.com" 
-                                  {...field} 
-                                  value={field.value ?? ""} 
-                                  data-testid="input-hosting-link" 
-                                />
-                                {field.value && (
-                                  <Button 
-                                    type="button" 
-                                    variant="outline" 
-                                    size="icon"
-                                    onClick={() => window.open(field.value || '', '_blank')}
-                                    data-testid="button-open-hosting"
-                                  >
-                                    <ExternalLink className="w-4 h-4" />
-                                  </Button>
-                                )}
-                              </div>
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="adminLoginLink"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Admin Login Link</FormLabel>
-                            <FormControl>
-                              <div className="flex gap-2">
-                                <Input 
-                                  placeholder="https://example.com/admin" 
-                                  {...field} 
-                                  value={field.value ?? ""} 
-                                  data-testid="input-admin-link" 
-                                />
-                                {field.value && (
-                                  <Button 
-                                    type="button" 
-                                    variant="outline" 
-                                    size="icon"
-                                    onClick={() => window.open(field.value || '', '_blank')}
-                                    data-testid="button-open-admin"
-                                  >
-                                    <ExternalLink className="w-4 h-4" />
-                                  </Button>
-                                )}
-                              </div>
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="adminUsername"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Admin Username</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="admin@example.com" 
-                                {...field} 
-                                value={field.value ?? ""} 
-                                data-testid="input-admin-username" 
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="adminPassword"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Admin Password</FormLabel>
-                            <FormControl>
-                              <div className="flex gap-2">
-                                <Input 
-                                  type={showPassword ? "text" : "password"}
-                                  placeholder="Enter password" 
-                                  {...field} 
-                                  value={field.value ?? ""} 
-                                  data-testid="input-admin-password" 
-                                />
-                                <Button 
-                                  type="button" 
-                                  variant="outline" 
-                                  size="icon"
-                                  onClick={() => setShowPassword(!showPassword)}
-                                  data-testid="button-toggle-password"
-                                >
-                                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                </Button>
-                              </div>
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <FormField
-                      control={form.control}
-                      name="credentialsNotes"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Additional Notes</FormLabel>
-                          <FormControl>
-                            <Textarea 
-                              placeholder="Any additional credential notes..." 
-                              {...field} 
-                              value={field.value ?? ""} 
-                              data-testid="input-credentials-notes" 
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </TabsContent>
-                </Tabs>
-                
-                <div className="flex justify-end gap-2 pt-4 border-t">
+                          <SelectContent position="popper">
+                            <SelectItem value="planning">Planning</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="on-hold">On Hold</SelectItem>
+                            <SelectItem value="completed">Completed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="budget"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Budget</FormLabel>
+                        <FormControl>
+                          <Input type="number" placeholder="5000" {...field} value={field.value ?? ""} data-testid="input-budget" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="deadline"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Deadline</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} value={field.value ?? ""} data-testid="input-deadline" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="Project details..." {...field} value={field.value ?? ""} data-testid="input-description" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="flex justify-end gap-2">
                   <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
                   <Button type="submit" data-testid="button-submit-project">
                     {editingProject ? "Update Project" : "Create Project"}
