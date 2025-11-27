@@ -109,7 +109,7 @@ export default function ProjectCredentialsPage() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       projectName: "",
-      clientId: "",
+      clientId: "none",
       hostingPlatform: "",
       liveLink: "",
       adminPanelLink: "",
@@ -134,7 +134,7 @@ export default function ProjectCredentialsPage() {
     mutationFn: async (data: FormData) => {
       const formData = new FormData();
       Object.entries(data).forEach(([key, value]) => {
-        if (value) formData.append(key, value);
+        if (value && value !== "none") formData.append(key, value);
       });
       if (thumbnailFile) {
         formData.append("thumbnail", thumbnailFile);
@@ -170,7 +170,7 @@ export default function ProjectCredentialsPage() {
     mutationFn: async ({ id, data }: { id: string; data: FormData }) => {
       const formData = new FormData();
       Object.entries(data).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) formData.append(key, value);
+        if (value !== undefined && value !== null && value !== "none") formData.append(key, value);
       });
       if (thumbnailFile) {
         formData.append("thumbnail", thumbnailFile);
@@ -226,7 +226,7 @@ export default function ProjectCredentialsPage() {
     setEditingCredential(credential);
     form.reset({
       projectName: credential.projectName,
-      clientId: credential.clientId || "",
+      clientId: credential.clientId || "none",
       hostingPlatform: credential.hostingPlatform || "",
       liveLink: credential.liveLink || "",
       adminPanelLink: credential.adminPanelLink || "",
@@ -351,7 +351,7 @@ export default function ProjectCredentialsPage() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="">No Client</SelectItem>
+                            <SelectItem value="none">No Client</SelectItem>
                             {clients?.map((client) => (
                               <SelectItem key={client.id} value={client.id}>
                                 {client.name} {client.company ? `(${client.company})` : ""}
