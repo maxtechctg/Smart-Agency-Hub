@@ -49,6 +49,12 @@ export default function ChatWidget() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  // Fetch client's projects to enable starting new conversations
+  const { data: clientProjects } = useQuery<Project[]>({
+    queryKey: ["/api/projects"],
+    enabled: isOpen && user?.role === "client",
+  });
+
   // UNIFIED INBOX: Fetch all messages from all projects (for developers/admins)
   const { data: messages, isLoading, refetch } = useQuery<EnrichedMessage[]>({
     queryKey: ["/api/messages"],
@@ -301,14 +307,22 @@ export default function ChatWidget() {
     
     // CRITICAL: Only auto-select if NO conversation is currently selected
     // This prevents resetting selectedConversation after sending a message
-    if (messages && messages.length > 0 && !selectedConversation) {
-      const latestMessage = messages[0];
-      console.log("🔹 AUTO-SELECT: Selecting first conversation", latestMessage?.projectId);
-      if (latestMessage?.projectId) {
-        setSelectedConversation(latestMessage.projectId);
+    if (!selectedConversation) {
+      if (messages && messages.length > 0) {
+        // Auto-select from existing messages
+        const latestMessage = messages[0];
+        console.log("🔹 AUTO-SELECT: Selecting first conversation from messages", latestMessage?.projectId);
+        if (latestMessage?.projectId) {
+          setSelectedConversation(latestMessage.projectId);
+        }
+      } else if (user?.role === "client" && clientProjects && clientProjects.length > 0) {
+        // CLIENT: No messages yet, but has projects - auto-select first project to start conversation
+        const firstProject = clientProjects[0];
+        console.log("🔹 AUTO-SELECT: Client has no messages, selecting first project", firstProject.id);
+        setSelectedConversation(firstProject.id);
       }
     }
-  }, [messages]); // REMOVED selectedConversation from deps to prevent resets
+  }, [messages, clientProjects, user?.role]); // REMOVED selectedConversation from deps to prevent resets
 
   const handleSend = async () => {
     console.log("🚀 HANDLE SEND: Called", { 
@@ -521,8 +535,15 @@ export default function ChatWidget() {
               ) : !messages || messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center">
+                    <MessageCircle className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                     <p className="text-sm font-medium mb-1">No messages yet</p>
-                    <p className="text-xs text-muted-foreground">Waiting for conversations...</p>
+                    {user?.role === "client" && clientProjects && clientProjects.length > 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Type below to start a conversation about your project
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Waiting for conversations...</p>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -628,11 +649,23 @@ export default function ChatWidget() {
               {selectedConversation ? (
                 <>
                   <div className="text-[10px] text-muted-foreground mb-2">
-                    Replying to: <span className="font-semibold">
-                      {messages?.find(m => m.projectId === selectedConversation)?.projectName}
-                      {" "}
-                      ({messages?.find(m => m.projectId === selectedConversation)?.clientName})
-                    </span>
+                    {messages && messages.length > 0 ? (
+                      <>
+                        Replying to: <span className="font-semibold">
+                          {messages?.find(m => m.projectId === selectedConversation)?.projectName}
+                          {" "}
+                          ({messages?.find(m => m.projectId === selectedConversation)?.clientName})
+                        </span>
+                      </>
+                    ) : user?.role === "client" && clientProjects ? (
+                      <>
+                        Sending to: <span className="font-semibold">
+                          {clientProjects.find(p => p.id === selectedConversation)?.name || "Your Project"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="font-semibold">Ready to send</span>
+                    )}
                   </div>
                   <div className="space-y-2">
                     {selectedFile && (
