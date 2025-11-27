@@ -74,6 +74,27 @@ export default function SalarySlip() {
   // Fetch salary slip data
   const { data: salarySlip, isLoading: isLoadingSlip } = useQuery<SalarySlipData>({
     queryKey: ["/api/salary-slip", selectedEmployee, selectedMonth, selectedYear],
+    queryFn: async () => {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `/api/salary-slip?employeeId=${selectedEmployee}&month=${selectedMonth}&year=${selectedYear}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null;
+        }
+        throw new Error("Failed to fetch salary slip");
+      }
+      
+      return response.json();
+    },
     enabled: !!selectedEmployee && !!selectedMonth && !!selectedYear
   });
 
