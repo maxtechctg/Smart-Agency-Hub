@@ -9627,31 +9627,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const projectId = req.query.projectId as string;
       console.log("🔵 GET /api/messages - User:", req.userId, "Role:", req.userRole, "ProjectId:", projectId);
       
+      // UNIFIED INBOX: Return enriched messages with client/project info
+      let allMessages;
+      
       // CLIENT SECURITY: Clients can only view messages for their own projects
       if (req.userRole === "client") {
-        if (!projectId) {
-          return res.status(400).json({ error: "Project ID is required for clients" });
-        }
-        
         // Get user's clientId
         const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
         if (!user?.clientId) {
           return res.status(403).json({ error: "No client associated with this user" });
         }
         
-        // Verify client owns this project
-        const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-        if (!project) {
-          return res.status(404).json({ error: "Project not found" });
+        if (projectId) {
+          // Verify client owns this specific project
+          const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+          if (!project) {
+            return res.status(404).json({ error: "Project not found" });
+          }
+          
+          if (project.clientId !== user.clientId) {
+            return res.status(403).json({ error: "Access denied: You can only view messages for your own projects" });
+          }
+          
+          // Fetch messages for this specific project (single project view)
+          allMessages = await db
+            .select({
+              id: messages.id,
+              projectId: messages.projectId,
+              userId: messages.userId,
+              content: messages.content,
+              fileUrl: messages.fileUrl,
+              fileName: messages.fileName,
+              fileType: messages.fileType,
+              createdAt: messages.createdAt,
+              projectName: projects.name,
+              clientId: clients.id,
+              clientName: clients.name,
+              senderName: users.fullName,
+              senderRole: users.role,
+            })
+            .from(messages)
+            .leftJoin(projects, eq(messages.projectId, projects.id))
+            .leftJoin(clients, eq(projects.clientId, clients.id))
+            .leftJoin(users, eq(messages.userId, users.id))
+            .where(eq(messages.projectId, projectId))
+            .orderBy(asc(messages.createdAt));
+        } else {
+          // CLIENT UNIFIED INBOX: No projectId provided, fetch ALL messages from ALL client's projects
+          // This shows BOTH client messages AND admin/team replies
+          const clientProjects = await db.select({ id: projects.id }).from(projects).where(eq(projects.clientId, user.clientId));
+          const projectIds = clientProjects.map(p => p.id);
+          
+          console.log("🔵 Client unified inbox - fetching messages for", projectIds.length, "projects");
+          
+          if (projectIds.length === 0) {
+            return res.json([]);
+          }
+          
+          // Fetch all messages from all client's projects
+          allMessages = await db
+            .select({
+              id: messages.id,
+              projectId: messages.projectId,
+              userId: messages.userId,
+              content: messages.content,
+              fileUrl: messages.fileUrl,
+              fileName: messages.fileName,
+              fileType: messages.fileType,
+              createdAt: messages.createdAt,
+              projectName: projects.name,
+              clientId: clients.id,
+              clientName: clients.name,
+              senderName: users.fullName,
+              senderRole: users.role,
+            })
+            .from(messages)
+            .leftJoin(projects, eq(messages.projectId, projects.id))
+            .leftJoin(clients, eq(projects.clientId, clients.id))
+            .leftJoin(users, eq(messages.userId, users.id))
+            .where(sql`${messages.projectId} = ANY(ARRAY[${sql.join(projectIds.map(id => sql`${id}`), sql`, `)}])`)
+            .orderBy(asc(messages.createdAt));
+          
+          console.log("✅ Client unified inbox: Fetched", allMessages.length, "messages from", projectIds.length, "projects");
         }
         
-        if (project.clientId !== user.clientId) {
-          return res.status(403).json({ error: "Access denied: You can only view messages for your own projects" });
-        }
+        return res.json(allMessages);
       }
-      
-      // UNIFIED INBOX: Return enriched messages with client/project info
-      let allMessages;
       
       if (projectId) {
         // Single project view (for clients or specific project)

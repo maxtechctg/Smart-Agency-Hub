@@ -36,7 +36,7 @@ The sidebar features bold uppercase section headers, expandable/collapsible sub-
 
 ### Feature Specifications
 - **Core Modules**: Authentication, Dashboard, CRM (Leads, Clients), Projects, Tasks, Staff Attendance, Finance (Income/Expenses), Invoices, Unified Inbox Chat, Files, Audit Logs, Client Portal.
-- **Floating Chat Widget (Unified Inbox)**: Intercom-style unified inbox accessible from all pages via a floating button. Developers/admins see all messages from all assigned projects; auto-routes replies to correct project. Uses React Portal.
+- **Floating Chat Widget (Unified Inbox)**: Intercom-style unified inbox accessible from all pages via a floating button. All roles see unified inbox: Admins see all project messages; Developers see messages from assigned projects; Clients see ALL messages (including admin/team replies) from their own projects. Auto-routes replies to correct project. Uses React Portal.
 - **Client Portal**: Dedicated dashboard for client role with filtered access to projects, invoices, payments, and files. Data access is strictly controlled to their specific projects via `clientId`.
 - **Access Control**: Robust RBAC implemented across all endpoints with the following role-based permissions:
   - **Admin**: Full unrestricted access to all projects, files, and system resources
