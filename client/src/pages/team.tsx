@@ -12,7 +12,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { UserPlus, Edit, Trash2, Users, Mail, Shield, Search, Plus } from "lucide-react";
+import { UserPlus, Edit, Trash2, Users, Mail, Shield, Search, Plus, Ban, CheckCircle } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,6 +24,7 @@ type User = {
   fullName: string;
   role: string;
   clientId?: string;
+  isActive: boolean;
   createdAt: string;
 };
 
@@ -227,9 +228,13 @@ export default function Team() {
     setEditOpen(true);
   };
 
-  const handleDelete = (user: User) => {
-    if (confirm(`Are you sure you want to delete ${user.fullName}? This action cannot be undone.`)) {
-      deleteMutation.mutate(user.id);
+  const handleToggleActive = (user: User) => {
+    const action = user.isActive ? "deactivate" : "activate";
+    if (confirm(`Are you sure you want to ${action} ${user.fullName}?`)) {
+      updateMutation.mutate({
+        id: user.id,
+        updates: { isActive: !user.isActive } as any // Type casting for partial update
+      });
     }
   };
 
@@ -517,9 +522,16 @@ export default function Team() {
                       <CardTitle className="text-lg truncate" data-testid={`text-user-name-${user.id}`}>
                         {user.fullName}
                       </CardTitle>
-                      <Badge className={roleColors[user.role]} data-testid={`badge-role-${user.id}`}>
-                        {roleLabels[user.role]}
-                      </Badge>
+                      <div className="flex gap-2">
+                        <Badge className={roleColors[user.role]} data-testid={`badge-role-${user.id}`}>
+                          {roleLabels[user.role]}
+                        </Badge>
+                        {!user.isActive && (
+                          <Badge variant="destructive" className="bg-red-100 text-red-800 hover:bg-red-200">
+                            Inactive
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </CardHeader>
@@ -546,11 +558,12 @@ export default function Team() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="ghost"
-                      onClick={() => handleDelete(user)}
-                      data-testid={`button-delete-${user.id}`}
+                      variant={user.isActive ? "destructive" : "default"}
+                      onClick={() => handleToggleActive(user)}
+                      title={user.isActive ? "Deactivate User" : "Activate User"}
+                      data-testid={`button-toggle-status-${user.id}`}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      {user.isActive ? <Ban className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
                     </Button>
                   </div>
                 </CardContent>
@@ -622,7 +635,7 @@ export default function Team() {
                       return role.permissions.map(p => resources?.find(r => r.id === p)?.name || p);
                     };
 
-                    const selectedRolePermissions = getRolePermissionsDisplay(field.value);
+                    const selectedRolePermissions = getRolePermissionsDisplay(field.value || "");
 
                     return (
                       <FormItem>

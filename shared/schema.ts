@@ -25,6 +25,7 @@ export const users = pgTable("users", {
   fullName: text("full_name").notNull(),
   role: text("role").notNull().default("developer"),
   clientId: varchar("client_id").references(() => clients.id),
+  isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -41,6 +42,7 @@ export const emailTemplates = pgTable("email_templates", {
   name: text("name").notNull(), // Template name for selection
   subject: text("subject").notNull(),
   message: text("message").notNull(),
+  attachments: jsonb("attachments").default([]),
   createdBy: varchar("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -569,6 +571,11 @@ export const bulkEmailSchema = z.object({
   leadIds: z.array(z.string()).min(1, "Select at least one lead"),
   subject: z.string().min(1, "Subject is required"),
   message: z.string().min(1, "Message is required"),
+  attachments: z.array(z.object({
+    name: z.string(),
+    url: z.string(),
+    type: z.string().optional()
+  })).optional().default([]),
 });
 
 export const insertClientSchema = createInsertSchema(clients).omit({
@@ -796,9 +803,18 @@ export const insertSalaryAdjustmentSchema = createInsertSchema(salaryAdjustments
   createdAt: true,
 });
 
-export const insertPerformanceScoreSchema = createInsertSchema(performanceScores).omit({
+export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
   id: true,
   createdAt: true,
+  createdBy: true,
+}).extend({
+  attachments: z.array(z.object({
+    name: z.string(),
+    url: z.string(),
+    type: z.string().optional()
+  })).optional().default([]),
+});
+createdAt: true,
 });
 
 export const insertProjectCredentialsSchema = createInsertSchema(projectCredentials).omit({

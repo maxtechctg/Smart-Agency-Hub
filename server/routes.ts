@@ -60,9 +60,18 @@ import {
   DEFAULT_LEAD_CATEGORIES,
   HOSTING_PLATFORMS,
   leadFolders,
-  emailTemplates,
-  insertLeadFolderSchema,
-  insertEmailTemplateSchema,
+
+export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
+    id: true,
+    createdAt: true,
+    createdBy: true,
+  }).extend({
+    attachments: z.array(z.object({
+      name: z.string(),
+      url: z.string(),
+      type: z.string().optional()
+    })).optional().default([]),
+  });
 } from "@shared/schema";
 import { authenticateToken, generateToken, type AuthRequest } from "./middleware/auth";
 import { auditLog, auditMiddleware } from "./middleware/audit";
@@ -74,6 +83,25 @@ import fs from "fs/promises";
 import path from "path";
 import PDFDocument from "pdfkit";
 import { formatCurrency, calculateLineTotal, sumAmounts } from "@shared/currency";
+
+// Configure storage for file uploads
+const storage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    const uploadDir = path.join(process.cwd(), "uploads");
+    try {
+      await fs.access(uploadDir);
+    } catch {
+      await fs.mkdir(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname.replace(/\s+/g, '_'));
+  }
+});
+
+const upload = multer({ storage: storage });
 import type { InvoiceItem } from "@shared/schema";
 import {
   addReportHeader,
@@ -89,7 +117,11 @@ import { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, Al
 import Decimal from "decimal.js-light";
 import { format } from "date-fns";
 import { EmailService } from "./services/email";
-import { roles, insertRoleSchema } from "@shared/schema";
+import {
+  roles,
+  insertLeadFolderSchema,
+  insertEmailTemplateSchema,
+} from "@shared/schema";
 
 export const RESOURCES = [
   { id: 'leads', name: 'Leads', paths: ['/api/leads', '/api/lead-folders', '/api/lead-categories'] },
@@ -175,6 +207,10 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       if (!validPassword) {
         console.log(`[LOGIN FAILED] Invalid password for user: ${email}`);
         return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      if (!user.isActive) {
+        return res.status(403).json({ error: "Account is deactivated. Please contact administrator." });
       }
 
       await auditLog(user.id, "login", "user", user.id);
@@ -614,6 +650,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       if (email !== undefined) updateData.email = email;
       if (role !== undefined) updateData.role = role;
       if (clientId !== undefined) updateData.clientId = clientId;
+      if (req.body.isActive !== undefined) updateData.isActive = req.body.isActive;
       if (password) {
         updateData.password = await bcrypt.hash(password, 10);
       }
