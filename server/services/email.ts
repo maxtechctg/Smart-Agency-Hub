@@ -2,6 +2,7 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import type { Task, Invoice, Lead, User } from "@shared/schema";
+import path from "path";
 
 interface EmailConfig {
   host: string;
@@ -100,7 +101,7 @@ export class EmailService {
     }
   }
 
-  private async sendEmail(to: string | null, subject: string, html: string) {
+  private async sendEmail(to: string | null, subject: string, html: string, attachments: any[] = []) {
     if (!to) {
       console.warn(`Email not sent: recipient address is null or empty (subject: ${subject})`);
       return false;
@@ -112,11 +113,27 @@ export class EmailService {
     }
 
     try {
+      // Process attachments to point to local file system
+      const processedAttachments = attachments.map(att => {
+        // If url starts with /uploads, modify to point to local path
+        if (att.url && att.url.startsWith('/uploads/')) {
+          return {
+            filename: att.name,
+            path: path.join(process.cwd(), att.url)
+          };
+        }
+        return {
+          filename: att.name,
+          path: att.url // Assuming absolute path if not /uploads
+        };
+      });
+
       const info = await this.transporter.sendMail({
         from: this.getFromAddress(),
         to,
         subject,
         html,
+        attachments: processedAttachments
       });
       console.log(`Email sent to ${to}: messageId=${(info && (info as any).messageId) || "unknown"}`);
       return true;
@@ -706,7 +723,7 @@ export class EmailService {
     }
   }
 
-  async sendCustomEmail(lead: Lead, template: { subject: string; message: string }, sender?: User | null): Promise<boolean> {
+  async sendCustomEmail(lead: Lead, template: { subject: string; message: string; attachments?: any[] }, sender?: User | null): Promise<boolean> {
     if (!lead?.email) {
       console.warn("Cannot send custom email: lead email missing");
       return false;
@@ -758,7 +775,7 @@ export class EmailService {
       </html>
     `;
 
-    return this.sendEmail(lead.email, subject, html);
+    return this.sendEmail(lead.email, subject, html, template.attachments || []);
   }
 
   isConfigured(): boolean {

@@ -2,7 +2,7 @@
 import { useState, useRef } from "react";
 import { Plus, Mail, Phone, Calendar, Search, X, Trash, Upload, FileSpreadsheet, Download, AlertCircle, CheckCircle2, Send, History, Clock, Check, XCircle, Sparkles, Folder, FolderOpen, ArrowLeft, MoreVertical, Copy, Move, FolderPlus, Eye, Edit, Trash2 } from "lucide-react";
 import { SmartLeadFinder } from "@/components/smart-lead-finder";
-import Swal from "sweetalert2";
+import { FileUpload } from "@/components/ui/file-upload";
 import "sweetalert2/dist/sweetalert2.min.css";
 
 import { Button } from "@/components/ui/button";
@@ -157,6 +157,7 @@ export default function Leads() {
   const [bulkMessageOpen, setBulkMessageOpen] = useState(false);
   const [bulkMessageSubject, setBulkMessageSubject] = useState("");
   const [bulkMessageContent, setBulkMessageContent] = useState("");
+  const [bulkMessageAttachments, setBulkMessageAttachments] = useState<any[]>([]);
   const [isSendingBulk, setIsSendingBulk] = useState(false);
 
   // Bulk upload states
@@ -175,6 +176,7 @@ export default function Leads() {
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [customSubject, setCustomSubject] = useState("");
   const [customMessage, setCustomMessage] = useState("");
+  const [customAttachments, setCustomAttachments] = useState<any[]>([]); // Array of {name, url, type}
   const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   // Smart Lead Finder state
@@ -503,6 +505,7 @@ export default function Leads() {
     setSelectedTemplate("");
     setCustomSubject("");
     setCustomMessage("");
+    setCustomAttachments([]);
     setEmailDialogOpen(true);
   };
 
@@ -522,6 +525,7 @@ export default function Leads() {
       if (selectedTemplate === "write_custom") {
         payload.subject = customSubject;
         payload.message = customMessage;
+        payload.attachments = customAttachments;
       }
 
       const response = await apiRequest("POST", `/api/leads/${selectedLeadForEmail.id}/emails/send`, payload) as { success: boolean; message: string };
@@ -532,6 +536,7 @@ export default function Leads() {
         setSelectedTemplate("");
         setCustomSubject("");
         setCustomMessage("");
+        setCustomAttachments([]);
       } else {
         toast({ title: "Error", description: response.message, variant: "destructive" });
       }
@@ -1548,6 +1553,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
         if (!open) {
           setBulkMessageSubject("");
           setBulkMessageContent("");
+          setBulkMessageAttachments([]);
         }
       }}>
         <DialogContent className="sm:max-w-2xl">

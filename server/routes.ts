@@ -1524,7 +1524,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const { leadIds, subject, message } = bulkEmailSchema.parse(req.body);
+      const { leadIds, subject, message, attachments } = bulkEmailSchema.parse(req.body);
 
       // Get leads with email addresses
       const leadsToEmail = await db.select().from(leads).where(inArray(leads.id, leadIds));
@@ -1551,7 +1551,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
               <hr style="border: 1px solid #eee; margin-top: 30px;">
               <p style="color: #666; font-size: 12px;">This email was sent by MaxTech BD</p>
             </div>`;
-          const emailResult = await emailService.sendEmail(lead.email, subject, html);
+          const emailResult = await emailService.sendEmail(lead.email, subject, html, attachments || []);
 
           if (emailResult.success) {
             // Save to message history
@@ -1847,7 +1847,8 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
         // Construct temp template object for sendCustomEmail
         customTemplate = {
           subject,
-          message: messageBody
+          message: messageBody,
+          attachments: req.body.attachments
         };
       } else {
         // Check if it's a custom template from DB

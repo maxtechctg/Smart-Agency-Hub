@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Pencil, Trash, Mail } from "lucide-react";
+import { Plus, Pencil, Trash, Mail, Paperclip } from "lucide-react";
+import { FileUpload } from "@/components/ui/file-upload";
 
 export default function EmailTemplates() {
     const { toast } = useToast();
@@ -61,7 +62,8 @@ export default function EmailTemplates() {
         defaultValues: {
             name: "",
             subject: "",
-            message: ""
+            message: "",
+            attachments: []
         }
     });
 
@@ -81,14 +83,16 @@ export default function EmailTemplates() {
         form.reset({
             name: template.name,
             subject: template.subject,
-            message: template.message
+            subject: template.subject,
+            message: template.message,
+            attachments: (template.attachments as any[]) || []
         });
         setOpen(true);
     };
 
     const handleAddNew = () => {
         setEditingTemplate(null);
-        form.reset({ name: "", subject: "", message: "" });
+        form.reset({ name: "", subject: "", message: "", attachments: [] });
         setOpen(true);
     };
 
@@ -133,6 +137,12 @@ export default function EmailTemplates() {
                                 <p className="text-sm text-muted-foreground line-clamp-3 bg-muted p-2 rounded-md font-mono whitespace-pre-wrap">
                                     {template.message}
                                 </p>
+                                {template.attachments && (template.attachments as any[]).length > 0 && (
+                                    <div className="mt-2 flex items-center text-xs text-muted-foreground">
+                                        <Paperclip className="w-3 h-3 mr-1" />
+                                        {(template.attachments as any[]).length} attachment(s)
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     ))}
@@ -173,6 +183,20 @@ export default function EmailTemplates() {
                                         <code className="bg-muted px-1 rounded text-primary">{"{{user.name}}"}</code>
                                     </div>
                                     <FormControl><Textarea className="min-h-[200px] font-mono" placeholder="Hi {{lead.name}}, ..." {...field} /></FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
+
+                            <FormField control={form.control} name="attachments" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Attachments</FormLabel>
+                                    <FormControl>
+                                        <FileUpload
+                                            value={field.value || []}
+                                            onChange={field.onChange}
+                                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.mp4"
+                                        />
+                                    </FormControl>
                                     <FormMessage />
                                 </FormItem>
                             )} />
