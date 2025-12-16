@@ -18,12 +18,14 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/lib/auth-context";
+import { useQuery } from "@tanstack/react-query";
+import type { Role } from "@shared/schema";
 
 // Main Menu Items
 const mainMenuItems = [
   {
     title: "Dashboard",
-    url: "/",
+    url: "/dashboard",
     icon: LayoutDashboard,
     roles: ["admin", "operational_head", "developer", "client"],
   },
@@ -209,6 +211,12 @@ const settingsItems = [
     roles: ["admin"],
   },
   {
+    title: "Audit Logs",
+    url: "/audit-logs",
+    icon: User,
+    roles: ["admin"],
+  },
+  {
     title: "Profile",
     url: "/settings",
     icon: User,
@@ -222,33 +230,74 @@ export function AppSidebar() {
   const [communicationOpen, setCommunicationOpen] = useState(true);
   const [payrollOpen, setPayrollOpen] = useState(true);
 
-  const filteredMainItems = mainMenuItems.filter(item => 
-    user?.role && item.roles.includes(user.role)
-  );
+  // Fetch all roles to check permissions for dynamic roles
+  const { data: roles, isLoading: rolesLoading, error: rolesError } = useQuery<Role[]>({ queryKey: ["/api/roles"] });
 
-  const filteredCommunicationSubItems = communicationItem.subItems.filter(item => 
-    user?.role && item.roles.includes(user.role)
-  );
+  if (rolesLoading) console.log("[Sidebar] Loading roles...");
+  if (rolesError) console.error("[Sidebar] Error loading roles:", rolesError);
+  if (roles) console.log("[Sidebar] Roles loaded:", roles);
+  if (user) console.log("[Sidebar] Current user:", user.role, user);
 
-  const showCommunication = user?.role && communicationItem.roles.includes(user.role) && filteredCommunicationSubItems.length > 0;
+  // Helper to check if user has permission for an item
+  const hasPermission = (item: { roles?: string[], url?: string }) => {
+    if (!user) return false;
 
-  const filteredHRItems = hrMenuItems.filter(item => 
-    user?.role && item.roles.includes(user.role)
-  );
+    // 1. Check strict role match (System roles)
+    if (item.roles?.includes(user.role)) return true;
 
-  const filteredPayrollSubItems = payrollItem.subItems.filter(item => 
-    user?.role && item.roles.includes(user.role)
-  );
+    // 2. Check dynamic permissions
+    // Find the user's role configuration
+    const userRoleConfig = roles?.find(r => r.name === user.role);
+    if (!userRoleConfig) {
+      console.warn(`[Sidebar] No role config found for role: ${user.role}`);
+      return false;
+    }
 
-  const showPayroll = user?.role && payrollItem.roles.includes(user.role);
+    // If item has a URL, check if that URL is in permissions (or mapped resource ID)
+    // Map URL to resource ID (simple mapping based on URL start)
+    const permissions = userRoleConfig.permissions as string[];
+    if (!permissions) return false;
 
-  const filteredAccountsItems = accountsMenuItems.filter(item => 
-    user?.role && item.roles.includes(user.role)
-  );
+    // Simple Mapping Strategy:
+    // If permission name is part of the URL, grant access.
+    // e.g. permission "leads" -> url "/leads"
+    // e.g. permission "projects" -> url "/projects"
+    if (item.url) {
+      if (item.url.startsWith("/dashboard")) {
+        // Allow if explicit 'dashboard' permission OR if they have at least one module access?
+        // For now, require 'dashboard' or 'leads' (legacy hack) or just 'dashboard'
+        if (permissions.includes("dashboard")) return true;
+        // Fallback: If they have any permissions, let them see dashboard?
+        // No, let's look for "dashboard" permission.
+      }
 
-  const filteredSettingsItems = settingsItems.filter(item => 
-    user?.role && item.roles.includes(user.role)
-  );
+      const resourceId = item.url.split('/')[1]; // e.g. "leads", "projects"
+      // Handle HR sub-routes
+      if (item.url.startsWith("/hr/")) return permissions.includes("hr");
+      if (item.url.startsWith("/accounts/")) return permissions.includes("finance");
+
+      return permissions.includes(resourceId);
+    }
+
+    return false;
+  };
+
+  const filteredMainItems = mainMenuItems.filter(item => hasPermission(item));
+
+  const filteredCommunicationSubItems = communicationItem.subItems.filter(item => hasPermission(item));
+
+  const showCommunication = hasPermission({ roles: communicationItem.roles }) && filteredCommunicationSubItems.length > 0;
+
+  const filteredHRItems = hrMenuItems.filter(item => hasPermission(item));
+
+  const filteredPayrollSubItems = payrollItem.subItems.filter(item => hasPermission(item));
+
+  const showPayroll = hasPermission({ roles: payrollItem.roles });
+
+  const filteredAccountsItems = accountsMenuItems.filter(item => hasPermission(item));
+
+  const filteredSettingsItems = settingsItems.filter(item => hasPermission(item));
+
 
   return (
     <Sidebar>
@@ -261,7 +310,7 @@ export function AppSidebar() {
           </div>
         </div>
       </SidebarHeader>
-      
+
       <SidebarContent>
         {/* MAIN MENU */}
         <SidebarGroup>
@@ -280,12 +329,12 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              
+
               {/* Communication Expandable */}
               {showCommunication && (
                 <>
                   <SidebarMenuItem>
-                    <SidebarMenuButton 
+                    <SidebarMenuButton
                       onClick={() => setCommunicationOpen(!communicationOpen)}
                       data-testid="nav-communication"
                     >
@@ -335,12 +384,12 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
-                
+
                 {/* Payroll Expandable */}
                 {showPayroll && (
                   <>
                     <SidebarMenuItem>
-                      <SidebarMenuButton 
+                      <SidebarMenuButton
                         onClick={() => setPayrollOpen(!payrollOpen)}
                         isActive={location === payrollItem.url}
                         data-testid="nav-payroll"

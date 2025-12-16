@@ -32,6 +32,12 @@ import {
   deviceLogs,
   hrSettings,
   projectCredentials,
+  leaveTypes,
+  leaveBalances,
+  leaveRequests,
+  punchCorrections,
+  performanceScores,
+  salarySlips,
   insertUserSchema,
   insertLeadSchema,
   insertLeadEmailSchema,
@@ -53,10 +59,13 @@ import {
   LEAD_EMAIL_TEMPLATES,
   DEFAULT_LEAD_CATEGORIES,
   HOSTING_PLATFORMS,
+  leadFolders,
+  emailTemplates,
+  insertLeadFolderSchema,
+  insertEmailTemplateSchema,
 } from "@shared/schema";
 import { authenticateToken, generateToken, type AuthRequest } from "./middleware/auth";
 import { auditLog, auditMiddleware } from "./middleware/audit";
-import { emailService } from "./services/email";
 import { serpApiService } from "./services/serpapi";
 import { wsService } from "./websocket";
 import { notificationService } from "./services/notification";
@@ -66,11 +75,11 @@ import path from "path";
 import PDFDocument from "pdfkit";
 import { formatCurrency, calculateLineTotal, sumAmounts } from "@shared/currency";
 import type { InvoiceItem } from "@shared/schema";
-import { 
-  addReportHeader, 
-  addReportFooter, 
-  createTableHeader, 
-  createTableRow, 
+import {
+  addReportHeader,
+  addReportFooter,
+  createTableHeader,
+  createTableRow,
   addSummarySection,
   BRAND_COLORS,
   COMPANY_INFO
@@ -79,26 +88,92 @@ import ExcelJS from "exceljs";
 import { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel, BorderStyle, ShadingType, Packer } from "docx";
 import Decimal from "decimal.js-light";
 import { format } from "date-fns";
+import { EmailService } from "./services/email";
+import { roles, insertRoleSchema } from "@shared/schema";
+
+export const RESOURCES = [
+  { id: 'leads', name: 'Leads', paths: ['/api/leads', '/api/lead-folders', '/api/lead-categories'] },
+  { id: 'clients', name: 'Clients', paths: ['/api/clients'] },
+  { id: 'projects', name: 'Projects & Tasks', paths: ['/api/projects', '/api/tasks', '/api/files', '/api/dashboard'] },
+  { id: 'finance', name: 'Finance', paths: ['/api/income', '/api/expenses', '/api/invoices', '/api/payments'] },
+  { id: 'hr', name: 'HR & Payroll', paths: ['/api/employees', '/api/attendance', '/api/departments', '/api/designations', '/api/payroll', '/api/leave', '/api/salary', '/api/performance'] },
+  { id: 'templates', name: 'Email Templates', paths: ['/api/email-templates'] },
+  { id: 'users', name: 'User Management', paths: ['/api/users', '/api/roles'] },
+];
+
+async function checkPermission(userRole: string, path: string): Promise<boolean> {
+  // 1. System Roles
+  if (userRole === 'admin') return true;
+  if (userRole === 'client') {
+    // Clients have limited access, handled by specific route logic usually
+    return path.startsWith('/api/dashboard') || path.startsWith('/api/projects'); // Basic assumption
+  }
+  if (userRole === 'developer') {
+    return path.startsWith('/api/dashboard') || path.startsWith('/api/tasks') || path.startsWith('/api/projects') || path.startsWith('/api/files') || path.startsWith('/api/users');
+  }
+  if (userRole === 'operational_head') {
+    // Legacy Operational Head access
+    return !path.startsWith('/api/users') || path === '/api/users'; // Can view users but maybe not full management?
+    // Actually operational_head had broad access in legacy code:
+    // leads, clients, projects, income, expenses, attendance (HR), templates
+    // Basically generic "Manager"
+    return true;
+  }
+
+  // 2. Dynamic Roles
+  // Check if role exists in DB
+  // optimization: we assume userRole is the role NAME or ID. 
+  // The user schema stores 'role' as text. 
+  // If it's not a reserved system role, we look it up.
+
+  const [role] = await db.select().from(roles).where(eq(roles.name, userRole)).limit(1);
+  if (!role) return false;
+
+  const permissions = role.permissions as string[]; // Array of allowed resource IDs or paths
+  if (!permissions) return false;
+
+  // Check if current path matches any allowed path
+  // We matched permissions to RESOURCE IDs in the frontend selection, 
+  // so 'permissions' array likely contains ['leads', 'projects'].
+  // or it could contain raw paths. 
+  // Let's assume it contains Resource IDs for simplicity in management.
+
+  // Find which resource this path belongs to
+  const resource = RESOURCES.find(r => r.paths.some(p => path.startsWith(p)));
+  if (!resource) return true; // Public or unlisted resource? Default allow or deny? 
+  // If we don't track it, maybe strictly deny? 
+  // For safety, let's say if it's NOT in RESOURCES, it's either public or specialized.
+  // But authenticatedToken blocks mostly.
+
+  return permissions.includes(resource.id);
+}
 
 const upload = multer({ dest: "uploads/" });
 
-export async function registerRoutes(app: Express): Promise<Server> {
+export async function registerRoutes(app: Express, emailService: any): Promise<Server> {
   app.use(express.json());
 
   // Auth routes - NO PUBLIC REGISTRATION
   // All user accounts (including clients) must be created by admin via Team page
-  
+
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { email, password } = req.body;
+      console.log(`[LOGIN ATTEMPT] Email: ${email}, Password provided: ${password ? "YES" : "NO"}`);
 
       const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
       if (!user) {
+        console.log(`[LOGIN FAILED] User not found for email: ${email}`);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
+      console.log(`[LOGIN USER FOUND] User ID: ${user.id}, Role: ${user.role}, Hash starts: ${user.password.substring(0, 5)}`);
+
       const validPassword = await bcrypt.compare(password, user.password);
+      console.log(`[LOGIN PASSWORD CHECK] Valid: ${validPassword}`);
+
       if (!validPassword) {
+        console.log(`[LOGIN FAILED] Invalid password for user: ${email}`);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
@@ -107,31 +182,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = generateToken(user.id, user.role);
       res.json({ user: { ...user, password: undefined }, token });
     } catch (error: any) {
+      console.error(`[LOGIN ERROR]`, error);
       res.status(400).json({ error: error.message });
     }
   });
 
   // Dashboard stats
+  // Dynamic Role Management
+  app.get("/api/resources", authenticateToken, (req, res) => {
+    res.json(RESOURCES);
+  });
+
+  app.get("/api/roles", authenticateToken, async (req, res) => {
+    try {
+      const allRoles = await db.select().from(roles);
+      res.json(allRoles);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/roles", authenticateToken, auditMiddleware("create", "role"), async (req: AuthRequest, res) => {
+    try {
+      // Only admin defaults can create roles? Or any "User Manager"?
+      // For now restrict to admin
+      if (req.userRole !== "admin") {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { name, permissions, description } = req.body;
+      // Basic validation
+      if (!name) return res.status(400).json({ error: "Role name is required" });
+
+      const [role] = await db.insert(roles).values({
+        name,
+        permissions: permissions || [],
+        description,
+      }).returning();
+
+      res.json(role);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/roles/:id", authenticateToken, auditMiddleware("delete", "role"), async (req: AuthRequest, res) => {
+    try {
+      if (req.userRole !== "admin") return res.status(403).json({ error: "Access denied" });
+
+      await db.delete(roles).where(eq(roles.id, req.params.id));
+      res.json({ message: "Role deleted" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Middleware helper for dynamic permission check could be applied globally or per route.
+  // customizing specific routes below...
+
   app.get("/api/dashboard/stats", authenticateToken, async (req: AuthRequest, res) => {
     try {
+      const hasPermission = await checkPermission(req.userRole!, req.path);
+      if (!hasPermission) return res.status(403).json({ error: "Access denied by role permission" });
+
       if (req.userRole === "client") {
         // Client-specific stats
         const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
         if (!user?.clientId) {
           return res.status(403).json({ error: "No client associated with this account" });
         }
-        
+
         const clientProjects = await db.select().from(projects).where(eq(projects.clientId, user.clientId));
         const activeProjects = clientProjects.filter(p => p.status === "active");
         const completedProjects = clientProjects.filter(p => p.status === "completed");
-        
+
         const clientInvoices = await db.select().from(invoices).where(eq(invoices.clientId, user.clientId));
         const totalSpent = clientInvoices.reduce((sum, inv) => sum + Number(inv.amount), 0);
         const paidInvoices = clientInvoices.filter(inv => inv.status === "paid");
         const pendingAmount = clientInvoices
           .filter(inv => inv.status !== "paid")
           .reduce((sum, inv) => sum + Number(inv.amount), 0);
-        
+
         return res.json({
           totalProjects: clientProjects.length,
           activeProjects: activeProjects.length,
@@ -142,7 +273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           paidInvoices: paidInvoices.length,
         });
       }
-      
+
       if (req.userRole === "developer") {
         // Developer-specific stats (only allowed resources)
         const allProjects = await db.select().from(projects);
@@ -151,7 +282,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const myTasks = allTasks.filter(t => t.assignedTo === req.userId);
         const myAttendance = await db.select().from(attendance).where(eq(attendance.userId, req.userId!));
         const allFiles = await db.select().from(files);
-        
+
         const attendanceRate = myAttendance.length > 0
           ? (myAttendance.filter(a => a.status !== "absent").length / myAttendance.length) * 100
           : 0;
@@ -166,7 +297,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           attendanceRate: Math.round(attendanceRate),
         });
       }
-      
+
       // Admin/Operational Head dashboard stats
       const allLeads = await db.select().from(leads);
       const allClients = await db.select().from(clients);
@@ -346,6 +477,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Client and developer role users can only see their own record
+      const hasPermission = await checkPermission(req.userRole!, req.path);
+      if (!hasPermission) return res.status(403).json({ error: "Access denied" });
+
       if (req.userRole === "client" || req.userRole === "developer") {
         const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
         if (!user) {
@@ -353,8 +487,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         return res.json([{ ...user, password: undefined }]);
       }
-      
+
       // Only admin and operational_head can see all users
+      // Check permission for "users" resource is already done above. 
+      // If we are here, we have permission.
       const allUsers = await db.select().from(users);
       res.json(allUsers.map(u => ({ ...u, password: undefined })));
     } catch (error: any) {
@@ -371,14 +507,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { fullName, email, password, role, clientId } = req.body;
-      
+
       if (!fullName || !email || !password || !role) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
       // Validate role
-      if (!["admin", "operational_head", "developer", "client"].includes(role)) {
-        return res.status(400).json({ error: "Invalid role" });
+      const systemRoles = ["admin", "operational_head", "developer", "client"];
+      if (!systemRoles.includes(role)) {
+        // Check if it's a valid custom role
+        const [customRole] = await db.select().from(roles).where(eq(roles.name, role)).limit(1);
+        if (!customRole) {
+          return res.status(400).json({ error: "Invalid role" });
+        }
       }
 
       // If role is client, clientId is required
@@ -425,7 +566,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { fullName, email, password, clientId } = req.body;
-      
+
       if (!fullName || !email || !password || !clientId) {
         return res.status(400).json({ error: "Missing required fields" });
       }
@@ -505,6 +646,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Cannot delete your own account" });
       }
 
+      // Manually handle FK constraints by setting references to null
+      // 1. Audit Logs
+      await db.update(auditLogs).set({ userId: null }).where(eq(auditLogs.userId, req.params.id));
+
+      // 2. Tasks (assigned to)
+      await db.update(tasks).set({ assignedTo: null }).where(eq(tasks.assignedTo, req.params.id));
+
+      // 3. Leads (assigned to)
+      await db.update(leads).set({ assignedTo: null }).where(eq(leads.assignedTo, req.params.id));
+
+      // 4. Projects (created by)
+      await db.update(projects).set({ createdBy: null }).where(eq(projects.createdBy, req.params.id));
+
+      // 5. Email Templates (created by) - if we want to keep templates
+      await db.update(emailTemplates).set({ createdBy: null }).where(eq(emailTemplates.createdBy, req.params.id));
+
+      // 6. Delete strictly related records (Cascading Delete)
+      await db.delete(attendance).where(eq(attendance.userId, req.params.id));
+      await db.delete(notifications).where(eq(notifications.userId, req.params.id));
+
+      // Delete messages and files (User is owner)
+      await db.delete(messages).where(eq(messages.userId, req.params.id));
+      await db.delete(files).where(eq(files.uploadedBy, req.params.id));
+
+      // Handle Employee Record Deletion (if exists)
+      const [employee] = await db.select().from(employees).where(eq(employees.userId, req.params.id)).limit(1);
+
+      if (employee) {
+        // Delete employee related records first to avoid param violations
+        await db.delete(leaveRequests).where(eq(leaveRequests.employeeId, employee.id));
+        await db.delete(leaveBalances).where(eq(leaveBalances.employeeId, employee.id));
+        await db.delete(punchCorrections).where(eq(punchCorrections.employeeId, employee.id));
+        await db.delete(performanceScores).where(eq(performanceScores.employeeId, employee.id));
+
+        // Handle Payroll and Salary Structure
+        const payrollRecords = await db.select().from(payroll).where(eq(payroll.employeeId, employee.id));
+        for (const p of payrollRecords) {
+          await db.delete(salarySlips).where(eq(salarySlips.payrollId, p.id));
+          await db.delete(salaryAdjustments).where(eq(salaryAdjustments.payrollId, p.id));
+        }
+        await db.delete(payroll).where(eq(payroll.employeeId, employee.id));
+
+        await db.delete(salaryStructure).where(eq(salaryStructure.employeeId, employee.id));
+        // Note: deviceLogs employeeId is text, not FK, but good to clean up if matched
+        await db.delete(deviceLogs).where(eq(deviceLogs.employeeId, employee.employeeId));
+
+        // Finally delete employee
+        await db.delete(employees).where(eq(employees.id, employee.id));
+      }
+
       const [user] = await db.delete(users)
         .where(eq(users.id, req.params.id))
         .returning();
@@ -523,7 +714,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/leads", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access leads
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -531,29 +722,120 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Build dynamic where conditions
       const conditions = [];
-      
+
       if (search && typeof search === "string") {
         conditions.push(sql`LOWER(${leads.name}) LIKE LOWER(${'%' + search + '%'})`);
       }
-      
+
       if (status && typeof status === "string") {
         conditions.push(eq(leads.status, status));
       }
-      
+
       if (source && typeof source === "string") {
         conditions.push(eq(leads.source, source));
       }
-      
+
       if (category && typeof category === "string") {
         conditions.push(eq(leads.category, category));
+      }
+
+      const userId = req.userId;
+      const { folderId } = req.query;
+
+      if (folderId && typeof folderId === "string") {
+        if (folderId === "uncategorized") {
+          conditions.push(sql`${leads.folderId} IS NULL`);
+        } else {
+          conditions.push(eq(leads.folderId, folderId));
+        }
       }
 
       // Apply filters if any, otherwise get all leads
       const allLeads = conditions.length > 0
         ? await db.select().from(leads).where(and(...conditions)).orderBy(desc(leads.createdAt))
         : await db.select().from(leads).orderBy(desc(leads.createdAt));
-      
+
       res.json(allLeads);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Email templates
+  app.get("/api/email-templates", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Only admin and operational_head can access templates
+      if (!await checkPermission(req.userRole!, req.path)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const templates = await db.select().from(emailTemplates).orderBy(desc(emailTemplates.createdAt));
+      res.json(templates);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/email-templates", authenticateToken, auditMiddleware("create", "email_template"), async (req: AuthRequest, res) => {
+    try {
+      if (!await checkPermission(req.userRole!, req.path)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const data = insertEmailTemplateSchema.parse(req.body);
+      const [template] = await db.insert(emailTemplates).values({
+        ...data,
+        createdBy: req.userId,
+      }).returning();
+
+      res.json(template);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/email-templates/:id", authenticateToken, auditMiddleware("update", "email_template"), async (req: AuthRequest, res) => {
+    try {
+      if (!await checkPermission(req.userRole!, req.path)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { name, subject, message } = req.body;
+      const updateData: any = {};
+      if (name) updateData.name = name;
+      if (subject) updateData.subject = subject;
+      if (message) updateData.message = message;
+
+      const [template] = await db.update(emailTemplates)
+        .set(updateData)
+        .where(eq(emailTemplates.id, req.params.id))
+        .returning();
+
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      res.json(template);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/email-templates/:id", authenticateToken, auditMiddleware("delete", "email_template"), async (req: AuthRequest, res) => {
+    try {
+      if (!await checkPermission(req.userRole!, req.path)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const [template] = await db.delete(emailTemplates)
+        .where(eq(emailTemplates.id, req.params.id))
+        .returning();
+
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      res.json({ message: "Template deleted" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -562,7 +844,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/leads", authenticateToken, auditMiddleware("create", "lead"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can create leads
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -595,7 +877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/leads/bulk-upload", authenticateToken, upload.single("file"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can bulk upload leads
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -605,9 +887,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const filePath = req.file.path;
       const originalName = req.file.originalname.toLowerCase();
-      
+
       let parsedRows: any[] = [];
-      
+
       // Parse based on file type
       if (originalName.endsWith(".csv")) {
         // CSV parsing
@@ -625,7 +907,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(filePath);
         const worksheet = workbook.worksheets[0];
-        
+
         if (!worksheet) {
           return res.status(400).json({ error: "No worksheet found in Excel file" });
         }
@@ -698,7 +980,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const source = String(normalizedRow.source || "").trim();
           const notes = String(normalizedRow.notes || "").trim();
           let followUpDate = normalizedRow.followupdate || normalizedRow["follow_up_date"] || normalizedRow["followup_date"] || normalizedRow.follow_up_date || "";
-          
+
           // Convert followUpDate to string if it's an object
           if (followUpDate && typeof followUpDate === "object" && followUpDate instanceof Date) {
             followUpDate = followUpDate.toISOString().split("T")[0];
@@ -798,7 +1080,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/leads/smart-finder/search", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can use smart lead finder
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -836,7 +1118,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/leads/smart-finder/search-all", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can use smart lead finder
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -876,7 +1158,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/leads/smart-finder/import", authenticateToken, auditMiddleware("create", "lead"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can import leads
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -904,7 +1186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // User's selected category takes priority, but fall back to API's category if user didn't select one
           // Using nullish coalescing (??) to preserve API data when user leaves selector blank
           const category = (defaultCategory && defaultCategory.trim())
-            ? String(defaultCategory).trim() 
+            ? String(defaultCategory).trim()
             : (lead.category ? String(lead.category).trim() : null);
 
           // Validation: name is required
@@ -957,7 +1239,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               .replace(/[.,\-]/g, '')
               .replace(/\s+/g, ' ')
               .replace(/\s*(ltd|llc|inc|corp|co|company|limited|pvt|private)\.?\s*$/i, '');
-            
+
             const existingByName = await db.select().from(leads).where(
               sql`LOWER(REGEXP_REPLACE(REGEXP_REPLACE(${leads.name}, '[.,\-]', '', 'g'), '\s*(ltd|llc|inc|corp|co|company|limited|pvt|private)\.?\s*$', '', 'i')) = ${normalizedName}`
             ).limit(1);
@@ -985,10 +1267,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           followUpDate.setDate(followUpDate.getDate() + 7);
 
           // Insert lead with user-selected source or default
-          const source = defaultSource 
-            ? String(defaultSource).trim() 
+          const source = defaultSource
+            ? String(defaultSource).trim()
             : "Smart Lead Finder";
-            
+
           const [newLead] = await db.insert(leads).values({
             name,
             email,
@@ -1033,7 +1315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/lead-categories", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access lead categories
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1117,11 +1399,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Lead Folders
+  app.get("/api/lead-folders", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const folders = await db.select().from(leadFolders).orderBy(asc(leadFolders.createdAt));
+      res.json(folders);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/lead-folders", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const data = insertLeadFolderSchema.parse(req.body);
+      const [folder] = await db.insert(leadFolders).values(data).returning();
+      res.json(folder);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/lead-folders/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const data = insertLeadFolderSchema.partial().parse(req.body);
+      const [folder] = await db.update(leadFolders).set(data).where(eq(leadFolders.id, req.params.id)).returning();
+      res.json(folder);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/lead-folders/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Check if folder has leads? Maybe handle in frontend or Cascade if DB configured?
+      // For now, allow delete.
+      await db.delete(leadFolders).where(eq(leadFolders.id, req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Email Templates
+  app.get("/api/email-templates", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const templates = await db.select().from(emailTemplates).orderBy(desc(emailTemplates.createdAt));
+      res.json(templates);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/email-templates", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const data = insertEmailTemplateSchema.parse({ ...req.body, createdBy: req.userId });
+      const [template] = await db.insert(emailTemplates).values(data).returning();
+      res.json(template);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/email-templates/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const data = insertEmailTemplateSchema.partial().parse(req.body);
+      const [template] = await db.update(emailTemplates).set(data).where(eq(emailTemplates.id, req.params.id)).returning();
+      res.json(template);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/email-templates/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      await db.delete(emailTemplates).where(eq(emailTemplates.id, req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Bulk Email to Leads
   app.post("/api/leads/bulk-email", authenticateToken, auditMiddleware("create", "lead_email"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can send bulk emails
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1129,7 +1491,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get leads with email addresses
       const leadsToEmail = await db.select().from(leads).where(inArray(leads.id, leadIds));
-      
+
       const results = {
         success: 0,
         failed: 0,
@@ -1147,16 +1509,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           // Send email
-          const emailResult = await emailService.sendEmail({
-            to: lead.email,
-            subject: subject,
-            text: message,
-            html: `<div style="font-family: Arial, sans-serif; line-height: 1.6;">
+          const html = `<div style="font-family: Arial, sans-serif; line-height: 1.6;">
               ${message.split('\n').map(line => `<p>${line}</p>`).join('')}
               <hr style="border: 1px solid #eee; margin-top: 30px;">
               <p style="color: #666; font-size: 12px;">This email was sent by MaxTech BD</p>
-            </div>`,
-          });
+            </div>`;
+          const emailResult = await emailService.sendEmail(lead.email, subject, html);
 
           if (emailResult.success) {
             // Save to message history
@@ -1213,7 +1571,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/leads/:id/messages", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can view message history
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1240,7 +1598,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/leads/:id", authenticateToken, auditMiddleware("update", "lead"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can update leads
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1252,10 +1610,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/leads/:id/copy", authenticateToken, auditMiddleware("create", "lead"), async (req: AuthRequest, res) => {
+    try {
+      // Only admin and operational_head can copy leads
+      if (!await checkPermission(req.userRole!, req.path)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { folderId } = req.body;
+      const [originalLead] = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
+
+      if (!originalLead) {
+        return res.status(404).json({ error: "Lead not found" });
+      }
+
+      const { id, createdAt, ...leadData } = originalLead;
+      leadData.folderId = folderId || null; // Target folder
+      leadData.name = `${leadData.name} (Copy)`;
+
+      const [newLead] = await db.insert(leads).values(leadData).returning();
+      res.json(newLead);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   app.delete("/api/leads/:id", authenticateToken, auditMiddleware("delete", "lead"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can delete leads
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1270,7 +1653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/leads/:id/emails", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can view lead emails
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1286,19 +1669,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk send custom message
+  app.post("/api/leads/bulk-message", authenticateToken, async (req: AuthRequest, res) => {
+    console.log("BULK MESSAGE API HIT");
+    try {
+      // Only admin and operational_head can send bulk emails
+      if (!await checkPermission(req.userRole!, req.path)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { leadIds, subject, content } = req.body;
+
+      if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+        return res.status(400).json({ error: "No leads selected" });
+      }
+
+      if (!subject || !content) {
+        return res.status(400).json({ error: "Subject and content are required" });
+      }
+
+      // Get sender info
+      const [sender] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
+
+      let successCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+
+      // Process each lead
+      for (const leadId of leadIds) {
+        try {
+          const [lead] = await db
+            .select()
+            .from(leads)
+            .where(eq(leads.id, leadId))
+            .limit(1);
+
+          if (!lead) {
+            failedCount++;
+            errors.push(`Lead ${leadId} not found`);
+            continue;
+          }
+
+          if (!lead.email) {
+            failedCount++;
+            errors.push(`Lead ${lead.name} has no email`);
+            continue;
+          }
+
+          // Create email record
+          const [emailRecord] = await db
+            .insert(leadEmails)
+            .values({
+              leadId: lead.id,
+              templateName: "custom_bulk",
+              subject,
+              status: "pending",
+              sentBy: req.userId!,
+            })
+            .returning();
+
+          // Send email
+          const customTemplate = { subject, message: content };
+          const sent = await emailService.sendCustomEmail(lead, customTemplate, sender);
+
+          if (sent) {
+            successCount++;
+            await db
+              .update(leadEmails)
+              .set({ status: "sent", sentAt: new Date() })
+              .where(eq(leadEmails.id, emailRecord.id));
+          } else {
+            failedCount++;
+            errors.push(`Failed to send email to ${lead.email}`);
+            await db
+              .update(leadEmails)
+              .set({ status: "failed", errorMessage: "Email service failed to send" })
+              .where(eq(leadEmails.id, emailRecord.id));
+          }
+
+        } catch (err: any) {
+          failedCount++;
+          errors.push(`Error processing lead ${leadId}: ${err.message}`);
+        }
+      }
+
+      res.json({
+        success: successCount,
+        failed: failedCount,
+        errors
+      });
+
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/leads/:id/emails/send", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can send emails to leads
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
       const { templateName } = req.body;
-      
-      if (!templateName || !LEAD_EMAIL_TEMPLATES.includes(templateName)) {
-        return res.status(400).json({ 
-          error: "Invalid template. Valid templates: " + LEAD_EMAIL_TEMPLATES.join(", ") 
-        });
+
+      if (!templateName) {
+        return res.status(400).json({ error: "Template is required" });
       }
 
       // Get lead info
@@ -1312,15 +1788,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Lead not found" });
       }
 
-      // Get email subject
-      const subject = emailService.getTemplateSubject(templateName);
+      let subject = "";
+      let isCustom = false;
+      let customHtml = "";
+      let customTemplate: any;
+
+      // Check if it's a system template
+      if (LEAD_EMAIL_TEMPLATES.includes(templateName as any)) {
+        subject = emailService.getTemplateSubject(templateName);
+      } else if (templateName === "write_custom") {
+        // Custom template (Manual)
+        subject = req.body.subject;
+        const messageBody = req.body.message;
+
+        if (!subject || !messageBody) {
+          return res.status(400).json({ error: "Subject and message are required for custom emails" });
+        }
+
+        isCustom = true;
+
+        // Construct temp template object for sendCustomEmail
+        customTemplate = {
+          subject,
+          message: messageBody
+        };
+      } else {
+        // Check if it's a custom template from DB
+        const [t] = await db.select().from(emailTemplates).where(eq(emailTemplates.id, templateName)).limit(1);
+        if (!t) {
+          return res.status(400).json({
+            error: "Invalid template. Valid templates: " + LEAD_EMAIL_TEMPLATES.join(", ") + " or 'write_custom'."
+          });
+        }
+        customTemplate = t;
+        subject = t.subject;
+        isCustom = true;
+      }
 
       // Create email record
       const [emailRecord] = await db
         .insert(leadEmails)
         .values({
           leadId: lead.id,
-          templateName,
+          templateName: isCustom ? "custom" : templateName,
           subject,
           status: "pending",
           sentBy: req.userId!,
@@ -1328,7 +1838,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .returning();
 
       // Send email
-      const success = await emailService.sendLeadTemplateEmail(lead, templateName);
+      let success = false;
+      if (isCustom && customTemplate) {
+        // Get sender info for variable substitution
+        const [sender] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
+        success = await emailService.sendCustomEmail(lead, customTemplate, sender);
+      } else {
+        success = await emailService.sendLeadTemplateEmail(lead, templateName);
+      }
 
       // Update email record with result
       if (success) {
@@ -1364,7 +1881,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/leads/:id/emails/send-welcome", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can send welcome emails
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1384,7 +1901,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       for (const templateName of templatesToSend) {
         const subject = emailService.getTemplateSubject(templateName);
-        
+
         // Create email record
         const [emailRecord] = await db
           .insert(leadEmails)
@@ -1426,14 +1943,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+
+
+  // Bulk send custom message
+  app.post("/api/leads/bulk-message", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // Only admin and operational_head can send bulk emails
+      if (!await checkPermission(req.userRole!, req.path)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { leadIds, subject, content } = req.body;
+
+      if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+        return res.status(400).json({ error: "No leads selected" });
+      }
+
+      if (!subject || !content) {
+        return res.status(400).json({ error: "Subject and content are required" });
+      }
+
+      // Get sender info
+      const [sender] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
+
+      let successCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+
+      // Process each lead
+      for (const leadId of leadIds) {
+        try {
+          const [lead] = await db
+            .select()
+            .from(leads)
+            .where(eq(leads.id, leadId))
+            .limit(1);
+
+          if (!lead) {
+            failedCount++;
+            errors.push(`Lead ${leadId} not found`);
+            continue;
+          }
+
+          if (!lead.email) {
+            failedCount++;
+            errors.push(`Lead ${lead.name} has no email`);
+            continue;
+          }
+
+          // Create email record
+          const [emailRecord] = await db
+            .insert(leadEmails)
+            .values({
+              leadId: lead.id,
+              templateName: "custom_bulk",
+              subject,
+              status: "pending",
+              sentBy: req.userId!,
+            })
+            .returning();
+
+          // Send email
+          const customTemplate = { subject, message: content };
+          const sent = await emailService.sendCustomEmail(lead, customTemplate, sender);
+
+          if (sent) {
+            successCount++;
+            await db
+              .update(leadEmails)
+              .set({ status: "sent", sentAt: new Date() })
+              .where(eq(leadEmails.id, emailRecord.id));
+          } else {
+            failedCount++;
+            errors.push(`Failed to send email to ${lead.email}`);
+            await db
+              .update(leadEmails)
+              .set({ status: "failed", errorMessage: "Email service failed to send" })
+              .where(eq(leadEmails.id, emailRecord.id));
+          }
+
+        } catch (err: any) {
+          failedCount++;
+          errors.push(`Error processing lead ${leadId}: ${err.message}`);
+        }
+      }
+
+      res.json({
+        success: successCount,
+        failed: failedCount,
+        errors
+      });
+
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Clients
   app.get("/api/clients", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access clients
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
-      
+
       const allClients = await db.select().from(clients).orderBy(desc(clients.createdAt));
       res.json(allClients);
     } catch (error: any) {
@@ -1444,19 +2057,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/clients", authenticateToken, auditMiddleware("create", "client"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can create clients
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
       const data = insertClientSchema.parse(req.body);
-      
+
       // Check for duplicate email
       const [existingClient] = await db
         .select()
         .from(clients)
         .where(eq(clients.email, data.email))
         .limit(1);
-      
+
       if (existingClient) {
         return res.status(400).json({ error: "A client with this email already exists" });
       }
@@ -1471,7 +2084,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/clients/:id", authenticateToken, auditMiddleware("update", "client"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can update clients
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1486,7 +2099,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/clients/:id", authenticateToken, auditMiddleware("delete", "client"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can delete clients
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1496,10 +2109,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(projects)
         .where(eq(projects.clientId, req.params.id))
         .limit(1);
-      
+
       if (clientProjects.length > 0) {
-        return res.status(400).json({ 
-          error: "Cannot delete client with associated projects. Please delete or reassign projects first." 
+        return res.status(400).json({
+          error: "Cannot delete client with associated projects. Please delete or reassign projects first."
         });
       }
 
@@ -1513,6 +2126,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Projects
   app.get("/api/projects", authenticateToken, async (req: AuthRequest, res) => {
     try {
+      if (!await checkPermission(req.userRole!, req.path)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
       let allProjects;
       if (req.userRole === "client") {
         // Get user's client ID
@@ -1559,7 +2175,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tasks", authenticateToken, async (req: AuthRequest, res) => {
     try {
       let allTasks: any[];
-      
+
       // CLIENT SECURITY: Clients can only view tasks from their own projects (read-only)
       if (req.userRole === "client") {
         // Get user's clientId
@@ -1567,11 +2183,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!user?.clientId) {
           return res.status(403).json({ error: "No client associated with this user" });
         }
-        
+
         // Get all projects for this client
         const clientProjects = await db.select().from(projects).where(eq(projects.clientId, user.clientId));
         const projectIds = clientProjects.map(p => p.id);
-        
+
         if (projectIds.length > 0) {
           // Use inArray for safe parameter binding (prevents SQL injection)
           allTasks = await db.select().from(tasks)
@@ -1583,7 +2199,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         allTasks = await db.select().from(tasks).orderBy(desc(tasks.createdAt));
       }
-      
+
       res.json(allTasks);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1593,13 +2209,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/tasks", authenticateToken, auditMiddleware("create", "task"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can create tasks
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
       const data = insertTaskSchema.parse(req.body);
       const [task] = await db.insert(tasks).values(data).returning();
-      
+
       // Send email notification to assignee if assigned
       if (task.assignedTo) {
         const [assignee] = await db.select().from(users).where(eq(users.id, task.assignedTo)).limit(1);
@@ -1608,7 +2224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await emailService.sendTaskAssignment({ ...task, project }, assignee);
         }
       }
-      
+
       res.json(task);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -1695,7 +2311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/attendance/manual", authenticateToken, auditMiddleware("create", "attendance"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can manually add attendance
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1720,10 +2336,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const [employeeRecord] = await db.select().from(employees)
         .where(eq(employees.userId, userId))
         .limit(1);
-      
+
       if (!employeeRecord) {
-        return res.status(400).json({ 
-          error: "This user does not have an employee record. Please create an employee record first before adding attendance." 
+        return res.status(400).json({
+          error: "This user does not have an employee record. Please create an employee record first before adding attendance."
         });
       }
 
@@ -1734,7 +2350,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (checkIn && checkIn.trim() !== "") {
         // Combine date (YYYY-MM-DD) with time (HH:MM) to create ISO timestamp
         checkInTimestamp = new Date(`${date}T${checkIn}:00`);
-        
+
         // Validate timestamp
         if (isNaN(checkInTimestamp.getTime())) {
           return res.status(400).json({ error: "Invalid check-in time format" });
@@ -1744,7 +2360,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (checkOut && checkOut.trim() !== "") {
         // Combine date (YYYY-MM-DD) with time (HH:MM) to create ISO timestamp
         checkOutTimestamp = new Date(`${date}T${checkOut}:00`);
-        
+
         // Validate timestamp
         if (isNaN(checkOutTimestamp.getTime())) {
           return res.status(400).json({ error: "Invalid check-out time format" });
@@ -1797,7 +2413,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/employees", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access employee list
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1831,10 +2447,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/income", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access finance records
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
-      
+
       const allIncome = await db.select().from(income).orderBy(desc(income.date));
       res.json(allIncome);
     } catch (error: any) {
@@ -1845,7 +2461,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/income", authenticateToken, auditMiddleware("create", "income"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can create income records
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1864,10 +2480,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/expenses", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access finance records
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
-      
+
       const allExpenses = await db.select().from(expenses).orderBy(desc(expenses.date));
       res.json(allExpenses);
     } catch (error: any) {
@@ -1878,7 +2494,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/expenses", authenticateToken, auditMiddleware("create", "expense"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can create expense records
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1896,10 +2512,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Expense Categories
   app.get("/api/expense-categories", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
-      
+
       const categories = await db.select().from(expenseCategories).orderBy(expenseCategories.name);
       res.json(categories);
     } catch (error: any) {
@@ -1909,7 +2525,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/expense-categories", authenticateToken, auditMiddleware("create", "expense_category"), async (req: AuthRequest, res) => {
     try {
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1923,7 +2539,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/expense-categories/:id", authenticateToken, auditMiddleware("update", "expense_category"), async (req: AuthRequest, res) => {
     try {
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1938,7 +2554,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/expense-categories/:id", authenticateToken, auditMiddleware("delete", "expense_category"), async (req: AuthRequest, res) => {
     try {
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1978,7 +2594,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/invoices", authenticateToken, auditMiddleware("create", "invoice"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can create invoices
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -1993,13 +2609,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/invoices/:id", authenticateToken, auditMiddleware("update", "invoice"), async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can update invoices
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
       const data = insertInvoiceSchema.partial().parse(req.body);
       const [invoice] = await db.update(invoices).set(data).where(eq(invoices.id, req.params.id)).returning();
-      
+
       // Send email notification when invoice is marked as sent
       if (data.status === "sent" && invoice.clientId) {
         const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId)).limit(1);
@@ -2007,7 +2623,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await emailService.sendInvoiceReminder({ ...invoice, client });
         }
       }
-      
+
       res.json(invoice);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -2017,14 +2633,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/invoices/:id/download", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const invoiceId = req.params.id;
-      
+
       // Get invoice with client information
       const [invoice] = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
-      
+
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
-      
+
       // Check access permissions
       if (req.userRole === "client") {
         // Clients can only download their own invoices
@@ -2036,34 +2652,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Developers and other roles don't have access
         return res.status(403).json({ error: "Access denied" });
       }
-      
+
       // Get client details
       const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId)).limit(1);
-      
+
       if (!client) {
         return res.status(404).json({ error: "Client not found" });
       }
-      
+
       // Generate PDF using pdfkit with professional design
-      const doc = new PDFDocument({ 
+      const doc = new PDFDocument({
         margin: 40,
         size: 'A4',
         bufferPages: true
       });
-      
+
       // Set response headers
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="Invoice-${invoice.invoiceNumber}.pdf"`);
-      
+
       // Pipe the PDF to the response
       doc.pipe(res);
-      
+
       // ===== PROFESSIONAL HEADER SECTION =====
       // Background color bar for header
       doc.save();
       doc.rect(0, 0, 595, 120).fill('#F8F9FA');
       doc.restore();
-      
+
       // Company Logo
       try {
         const logoPath = path.join(__dirname, "../attached_assets/Untitled design (1)_1763794635122.png");
@@ -2071,49 +2687,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.warn("Logo not found, skipping logo in PDF");
       }
-      
+
       // Company Information (right side of header)
       doc.fontSize(14).font("Helvetica-Bold").fillColor("#C8102E");
       doc.text("MaxTech BD", 350, 35, { width: 200, align: "right" });
-      
+
       doc.fontSize(9).font("Helvetica").fillColor("#212121");
       doc.text("522, SK Mujib Road (4th Floor)", 350, 52, { width: 200, align: "right" });
       doc.text("Agrabad, Double Mooring", 350, 64, { width: 200, align: "right" });
       doc.text("Chattogram, Bangladesh", 350, 76, { width: 200, align: "right" });
       doc.text("Phone: +8801843180008", 350, 92, { width: 200, align: "right" });
       doc.text("Email: info@maxtechbd.com", 350, 104, { width: 200, align: "right" });
-      
+
       // ===== INVOICE TITLE =====
       doc.fontSize(32).font("Helvetica-Bold").fillColor("#C8102E");
       doc.text("INVOICE", 40, 145);
-      
+
       // ===== TWO-COLUMN SECTION: Invoice Details & Bill To =====
       const detailsStartY = 200;
-      
+
       // Left Column - Invoice Details Box
       doc.save();
       doc.rect(40, detailsStartY, 250, 110).stroke("#E5E7EB");
       doc.rect(40, detailsStartY, 250, 30).fillAndStroke("#F3F4F6", "#E5E7EB");
       doc.restore();
-      
+
       doc.fontSize(11).font("Helvetica-Bold").fillColor("#374151");
       doc.text("Invoice Details", 50, detailsStartY + 8);
-      
+
       doc.fontSize(10).font("Helvetica").fillColor("#6B7280");
       doc.text("Invoice Number:", 50, detailsStartY + 45);
       doc.text("Invoice Date:", 50, detailsStartY + 62);
       doc.text("Due Date:", 50, detailsStartY + 79);
       doc.text("Status:", 50, detailsStartY + 96);
-      
+
       doc.font("Helvetica-Bold").fillColor("#111827");
       doc.text(invoice.invoiceNumber, 160, detailsStartY + 45);
-      doc.text(new Date(invoice.createdAt).toLocaleDateString('en-US', { 
-        year: 'numeric', month: 'short', day: 'numeric' 
+      doc.text(new Date(invoice.createdAt).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric'
       }), 160, detailsStartY + 62);
-      doc.text(new Date(invoice.dueDate).toLocaleDateString('en-US', { 
-        year: 'numeric', month: 'short', day: 'numeric' 
+      doc.text(new Date(invoice.dueDate).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric'
       }), 160, detailsStartY + 79);
-      
+
       // Status badge
       const statusColors: Record<string, string> = {
         'draft': '#9CA3AF',
@@ -2123,19 +2739,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       doc.fillColor(statusColors[invoice.status] || '#9CA3AF');
       doc.text(invoice.status.toUpperCase(), 160, detailsStartY + 96);
-      
+
       // Right Column - Bill To Box
       doc.save();
       doc.rect(305, detailsStartY, 250, 110).stroke("#E5E7EB");
       doc.rect(305, detailsStartY, 250, 30).fillAndStroke("#F3F4F6", "#E5E7EB");
       doc.restore();
-      
+
       doc.fontSize(11).font("Helvetica-Bold").fillColor("#374151");
       doc.text("Bill To", 315, detailsStartY + 8);
-      
+
       doc.fontSize(11).font("Helvetica-Bold").fillColor("#111827");
       doc.text(client.name, 315, detailsStartY + 45, { width: 230 });
-      
+
       doc.fontSize(10).font("Helvetica").fillColor("#6B7280");
       let billToY = detailsStartY + 62;
       if (client.email) {
@@ -2145,137 +2761,137 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (client.phone) {
         doc.text(client.phone, 315, billToY, { width: 230 });
       }
-      
+
       // ===== ITEMS TABLE =====
       const tableTop = 340;
       const rowHeight = 40;
       let currentY = tableTop + 35;
-      
+
       // Check if invoice has itemized lines
-      const invoiceItems = invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0 
+      const invoiceItems = invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0
         ? invoice.items as InvoiceItem[]
         : null;
-      
+
       if (invoiceItems) {
         // Render itemized invoice with quantity, rate, and amount columns
         // Table Header
         doc.save();
         doc.rect(40, tableTop, 515, 35).fillAndStroke("#C8102E", "#C8102E");
         doc.restore();
-        
+
         doc.fontSize(11).font("Helvetica-Bold").fillColor("#FFFFFF");
         doc.text("Description", 50, tableTop + 11, { width: 220 });
         doc.text("Qty", 280, tableTop + 11, { width: 50, align: "right" });
         doc.text("Rate", 340, tableTop + 11, { width: 80, align: "right" });
         doc.text("Amount", 430, tableTop + 11, { width: 115, align: "right" });
-        
+
         // Calculate line totals from quantity * rate (single source of truth)
         const calculatedLineTotals: string[] = [];
-        
+
         // Render each item
         invoiceItems.forEach((item, index) => {
           const bgColor = index % 2 === 0 ? "#FAFAFA" : "#FFFFFF";
           doc.save();
           doc.rect(40, currentY, 515, rowHeight).fillAndStroke(bgColor, "#E5E7EB");
           doc.restore();
-          
+
           // Calculate line total from quantity * rate
           const lineTotal = calculateLineTotal(item.quantity || 0, item.rate || 0);
           calculatedLineTotals.push(lineTotal);
-          
+
           doc.fontSize(10).font("Helvetica").fillColor("#374151");
           doc.text(item.description || 'Item', 50, currentY + 13, { width: 220 });
           doc.text(String(item.quantity || 0), 280, currentY + 13, { width: 50, align: "right" });
           doc.text(formatCurrency(item.rate || 0, { prefix: '' }), 340, currentY + 13, { width: 80, align: "right" });
           doc.font("Helvetica-Bold").fillColor("#111827");
           doc.text(formatCurrency(lineTotal), 430, currentY + 13, { width: 115, align: "right" });
-          
+
           currentY += rowHeight;
         });
-        
+
         // Calculate subtotal from calculated line totals (not stored amounts)
         const subtotal = sumAmounts(calculatedLineTotals);
-        
+
       } else {
         // Render simple single-amount invoice
         // Table Header
         doc.save();
         doc.rect(40, tableTop, 515, 35).fillAndStroke("#C8102E", "#C8102E");
         doc.restore();
-        
+
         doc.fontSize(11).font("Helvetica-Bold").fillColor("#FFFFFF");
         doc.text("Description", 50, tableTop + 11);
         doc.text("Amount", 450, tableTop + 11, { width: 95, align: "right" });
-        
+
         // Render single row
         doc.save();
         doc.rect(40, currentY, 515, rowHeight).fillAndStroke("#FAFAFA", "#E5E7EB");
         doc.restore();
-        
+
         doc.fontSize(10).font("Helvetica").fillColor("#374151");
         doc.text("Invoice Amount", 50, currentY + 13);
         doc.font("Helvetica-Bold").fillColor("#111827");
         doc.text(formatCurrency(invoice.amount), 450, currentY + 13, { width: 95, align: "right" });
-        
+
         currentY += rowHeight;
       }
-      
+
       // ===== SUMMARY SECTION =====
       currentY += rowHeight + 20;
-      
+
       // Subtotal
       doc.fontSize(10).font("Helvetica").fillColor("#6B7280");
       doc.text("Subtotal:", 350, currentY);
       doc.font("Helvetica").fillColor("#374151");
       doc.text(formatCurrency(invoice.amount), 450, currentY, { width: 95, align: "right" });
-      
+
       currentY += 25;
-      
+
       // Total Amount Due - Highlighted (draw background first, then text)
       const totalBoxX = 310;
       const totalBoxWidth = 245;
       const totalBoxRight = totalBoxX + totalBoxWidth;
-      
+
       doc.save();
       doc.rect(totalBoxX, currentY - 5, totalBoxWidth, 40).fillAndStroke("#F3F4F6", "#E5E7EB");
       doc.restore();
-      
+
       doc.fontSize(13).font("Helvetica-Bold").fillColor("#111827");
       doc.text("Total Amount Due:", totalBoxX + 10, currentY + 8);
       doc.fontSize(16).fillColor("#C8102E");
       doc.text(formatCurrency(invoice.amount), totalBoxRight - 105, currentY + 6, { width: 95, align: "right" });
-      
+
       // ===== NOTES SECTION =====
       if (invoice.notes) {
         currentY += 70;
         const notesBoxHeight = Math.min(invoice.notes.length / 2 + 60, 150);
-        
+
         doc.save();
         doc.rect(40, currentY, 515, notesBoxHeight).stroke("#E5E7EB");
         doc.rect(40, currentY, 515, 25).fillAndStroke("#F3F4F6", "#E5E7EB");
         doc.restore();
-        
+
         doc.fontSize(11).font("Helvetica-Bold").fillColor("#374151");
         doc.text("Notes", 50, currentY + 7);
-        
+
         doc.fontSize(10).font("Helvetica").fillColor("#6B7280");
         doc.text(invoice.notes, 50, currentY + 35, { width: 495, align: "left" });
       }
-      
+
       // ===== FOOTER =====
       const footerY = 720;
       doc.save();
       doc.rect(0, footerY, 595, 100).fill("#F8F9FA");
       doc.restore();
-      
+
       doc.fontSize(10).font("Helvetica-Bold").fillColor("#C8102E");
       doc.text("Thank you for your business!", 0, footerY + 20, { width: 595, align: "center" });
-      
+
       doc.fontSize(8).font("Helvetica").fillColor("#6B7280");
       doc.text("MaxTech BD", 0, footerY + 40, { width: 595, align: "center" });
       doc.text("522, SK Mujib Road (4th Floor), Agrabad, Double Mooring, Chattogram, Bangladesh", 0, footerY + 52, { width: 595, align: "center" });
       doc.text("Phone: +8801843180008 | Email: info@maxtechbd.com", 0, footerY + 64, { width: 595, align: "center" });
-      
+
       // Finalize the PDF
       doc.end();
     } catch (error: any) {
@@ -2288,7 +2904,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/profit-loss/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export P&L
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -2370,15 +2986,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.setHeader("Content-Type", "application/pdf");
       const categoryLabel = category !== "all" ? `-${category}` : "";
-      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month-1]}-${year}${categoryLabel}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month - 1]}-${year}${categoryLabel}.pdf"`);
 
       doc.pipe(res);
 
       // Add branded header
-      const subtitle = category !== "all" 
-        ? `${months[month-1]} ${year} - Category: ${category}`
-        : `${months[month-1]} ${year}`;
-      
+      const subtitle = category !== "all"
+        ? `${months[month - 1]} ${year} - Category: ${category}`
+        : `${months[month - 1]} ${year}`;
+
       let currentY = addReportHeader({
         doc,
         title: "Profit & Loss Statement",
@@ -2500,7 +3116,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/profit-loss/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export P&L
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -2622,9 +3238,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       worksheet.mergeCells('A7:B7');
       const subtitle = worksheet.getCell('A7');
-      subtitle.value = category !== "all" 
-        ? `${months[month-1]} ${year} - Category: ${category}`
-        : `${months[month-1]} ${year}`;
+      subtitle.value = category !== "all"
+        ? `${months[month - 1]} ${year} - Category: ${category}`
+        : `${months[month - 1]} ${year}`;
       subtitle.font = { size: 12 };
       subtitle.alignment = { horizontal: 'center' };
 
@@ -2752,7 +3368,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Set response headers
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       const categoryLabel = category !== "all" ? `-${category}` : "";
-      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month-1]}-${year}${categoryLabel}.xlsx"`);
+      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month - 1]}-${year}${categoryLabel}.xlsx"`);
 
       // Write to response
       await workbook.xlsx.write(res);
@@ -2767,7 +3383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/profit-loss/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export P&L
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -2870,7 +3486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               alignment: AlignmentType.CENTER,
               spacing: { after: 400 }
             }),
-            
+
             // Report Title
             new Paragraph({
               text: "Profit & Loss Statement",
@@ -2879,9 +3495,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               spacing: { after: 200 }
             }),
             new Paragraph({
-              text: category !== "all" 
-                ? `${months[month-1]} ${year} - Category: ${category}`
-                : `${months[month-1]} ${year}`,
+              text: category !== "all"
+                ? `${months[month - 1]} ${year} - Category: ${category}`
+                : `${months[month - 1]} ${year}`,
               alignment: AlignmentType.CENTER,
               spacing: { after: 100 }
             }),
@@ -3028,7 +3644,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             new Paragraph({
               children: [
                 new TextRun({ text: "Net Profit/Loss: ", bold: true, size: 28 }),
-                new TextRun({ 
+                new TextRun({
                   text: `${grossProfit >= 0 ? '' : '-'}${formatCurrency(Math.abs(grossProfit))}`,
                   bold: true,
                   size: 28,
@@ -3065,7 +3681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Set response headers
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       const categoryLabel = category !== "all" ? `-${category}` : "";
-      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month-1]}-${year}${categoryLabel}.docx"`);
+      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month - 1]}-${year}${categoryLabel}.docx"`);
 
       // Write to response using Packer
       const { Packer } = await import("docx");
@@ -3083,7 +3699,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/general-ledger/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export General Ledger
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -3233,7 +3849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/general-ledger/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export General Ledger
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -3428,7 +4044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/general-ledger/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export General Ledger
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -3532,7 +4148,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               alignment: AlignmentType.CENTER,
               spacing: { after: 400 }
             }),
-            
+
             // Report Title
             new Paragraph({
               children: [new TextRun({ text: "General Ledger", bold: true, size: 28 })],
@@ -3621,7 +4237,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             new Paragraph({
               children: [
                 new TextRun({ text: "Final Balance: ", bold: true, size: 28 }),
-                new TextRun({ 
+                new TextRun({
                   text: `${finalBalanceNum >= 0 ? '' : '-'}${formatCurrency(Math.abs(finalBalanceNum))}`,
                   bold: true,
                   size: 28,
@@ -3666,7 +4282,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/financial-reports/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Financial Reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -3794,7 +4410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/financial-reports/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Financial Reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -3964,7 +4580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/financial-reports/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Financial Reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -4046,7 +4662,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               alignment: AlignmentType.CENTER,
               spacing: { after: 400 }
             }),
-            
+
             // Report Title
             new Paragraph({
               children: [new TextRun({ text: "Financial Reports", bold: true, size: 28, color: "E11D26" })],
@@ -4082,7 +4698,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             new Paragraph({
               children: [
                 new TextRun({ text: "Net Profit: ", bold: true, size: 28 }),
-                new TextRun({ 
+                new TextRun({
                   text: `${totalProfitNum >= 0 ? '' : '-'}${formatCurrency(Math.abs(totalProfitNum))}`,
                   bold: true,
                   size: 28,
@@ -4139,14 +4755,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       new TableCell({ children: [new Paragraph({ text: data.month, alignment: AlignmentType.LEFT })] }),
                       new TableCell({ children: [new Paragraph({ text: formatCurrency(data.income), alignment: AlignmentType.RIGHT })] }),
                       new TableCell({ children: [new Paragraph({ text: formatCurrency(data.expenses), alignment: AlignmentType.RIGHT })] }),
-                      new TableCell({ children: [new Paragraph({ 
-                        children: [new TextRun({ 
-                          text: `${profitNum >= 0 ? '+' : '-'}${formatCurrency(Math.abs(profitNum))}`, 
-                          bold: true,
-                          color: profitNum >= 0 ? "10B981" : "EF4444"
-                        })], 
-                        alignment: AlignmentType.RIGHT 
-                      })] })
+                      new TableCell({
+                        children: [new Paragraph({
+                          children: [new TextRun({
+                            text: `${profitNum >= 0 ? '+' : '-'}${formatCurrency(Math.abs(profitNum))}`,
+                            bold: true,
+                            color: profitNum >= 0 ? "10B981" : "EF4444"
+                          })],
+                          alignment: AlignmentType.RIGHT
+                        })]
+                      })
                     ]
                   });
                 })
@@ -4186,12 +4804,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========== SALARY PROCESSING SYSTEM API ENDPOINTS ==========
-  
+
   // POST /api/payroll/generate - Generate salary for selected month/year based on attendance
   app.post("/api/payroll/generate", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can generate salary
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -4276,11 +4894,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (overtimeEnabled && att.checkIn && att.checkOut) {
             const checkIn = new Date(att.checkIn);
             const checkOut = new Date(att.checkOut);
-            
+
             // Validate that both timestamps are valid and checkOut is after checkIn
             if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime()) && checkOut > checkIn) {
               const hoursWorked = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
-              
+
               // Only calculate overtime if worked more than 8 hours
               if (hoursWorked > 8) {
                 totalOvertimeHours += hoursWorked - 8;
@@ -4300,10 +4918,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const absentDeduction = dailyRate * totalAbsentDays;
         const lateDeduction = dailyRate * (totalLateDays % 3) * (1 / 3); // Remaining lates not yet converted to absent
         const halfDayDeduction = dailyRate * 0.5 * totalHalfDays; // Half-day = 0.5 × daily rate
-        
+
         // ONLY calculate overtime amount if overtime is enabled
         const overtimeAmount = overtimeEnabled ? (hourlyRate * 1.5 * totalOvertimeHours) : 0;
-        
+
         if (!overtimeEnabled && totalOvertimeHours > 0) {
           console.log(`⚠️ Overtime DISABLED - Skipping ${totalOvertimeHours.toFixed(2)} hours for employee ${record.employee.employeeId}`);
         }
@@ -4356,7 +4974,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/payroll/:id/adjustments - Add manual adjustment to payroll
   app.post("/api/payroll/:id/adjustments", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -4400,7 +5018,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       });
 
-      const baseNetSalary = parseFloat(payrollRecord.grossSalary) - parseFloat(payrollRecord.lateDeduction) + parseFloat(payrollRecord.overtimeAmount);
+      const baseNetSalary =
+        parseFloat(payrollRecord.grossSalary ?? "0")
+        - parseFloat(payrollRecord.lateDeduction ?? "0")
+        + parseFloat(payrollRecord.overtimeAmount ?? "0");
       const newNetSalary = baseNetSalary + totalAdjustments;
 
       // Update payroll record with new net salary and other deductions
@@ -4422,7 +5043,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GET /api/payroll/:id/adjustments - Get all adjustments for a payroll record
   app.get("/api/payroll/:id/adjustments", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -4446,7 +5067,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PATCH /api/payroll/:id/status - Update payment status (generated -> paid)
   app.patch("/api/payroll/:id/status", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -4474,7 +5095,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DELETE /api/payroll/:payrollId/adjustments/:adjustmentId - Delete a manual adjustment
   app.delete("/api/payroll/:payrollId/adjustments/:adjustmentId", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -4501,7 +5122,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       });
 
-      const baseNetSalary = parseFloat(payrollRecord.grossSalary) - parseFloat(payrollRecord.lateDeduction) + parseFloat(payrollRecord.overtimeAmount);
+      const baseNetSalary =
+        parseFloat(payrollRecord.grossSalary ?? "0")
+        - parseFloat(payrollRecord.lateDeduction ?? "0")
+        + parseFloat(payrollRecord.overtimeAmount ?? "0");
       const newNetSalary = baseNetSalary + totalAdjustments;
 
       await db
@@ -4523,7 +5147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payroll-report", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access payroll reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -4564,56 +5188,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const signatureBoxHeight = 60;
     const gap = 12;
     const totalFooterHeight = signatureBoxHeight + 18; // Box + tagline
-    
+
     // Check if we need a new page for signature block
     if (currentY + totalFooterHeight > 750) {
       doc.addPage();
       currentY = 40;
     }
-    
+
     // Add some spacing before signature section
     currentY += 15;
     const footerY = currentY;
-    
+
     const x1 = 40;
     const x2 = x1 + signatureBoxWidth + gap;
     const x3 = x2 + signatureBoxWidth + gap;
-    
+
     const signatureFields = [
       { label: "Prepared By", name: "HR Manager", position: x1 },
       { label: "Verified By", name: "Accounts Head", position: x2 },
       { label: "Approved By", name: "Managing Director", position: x3 }
     ];
-    
+
     signatureFields.forEach(field => {
       // Signature box
       doc.save();
       doc.roundedRect(field.position, footerY, signatureBoxWidth, signatureBoxHeight, 3)
-         .strokeColor("#d6dae2")
-         .lineWidth(1)
-         .stroke();
+        .strokeColor("#d6dae2")
+        .lineWidth(1)
+        .stroke();
       doc.restore();
-      
+
       // Label
       doc.fontSize(8).font("Helvetica").fillColor("#6b7280");
       doc.text(field.label, field.position + 10, footerY + 10, { width: signatureBoxWidth - 20, align: "left" });
-      
+
       // Signature line
       doc.moveTo(field.position + 10, footerY + 35)
-         .lineTo(field.position + signatureBoxWidth - 10, footerY + 35)
-         .strokeColor("#d6dae2")
-         .lineWidth(1)
-         .stroke();
-      
+        .lineTo(field.position + signatureBoxWidth - 10, footerY + 35)
+        .strokeColor("#d6dae2")
+        .lineWidth(1)
+        .stroke();
+
       // Name
       doc.fontSize(9).font("Helvetica-Bold").fillColor(BRAND_COLORS.black);
       doc.text(field.name, field.position + 10, footerY + 40, { width: signatureBoxWidth - 20, align: "center" });
     });
-    
+
     // Company tagline at bottom
     doc.fontSize(7).font("Helvetica-Oblique").fillColor(BRAND_COLORS.gray);
     doc.text("MaxTech BD - Smart Agency Control Hub", 40, footerY + signatureBoxHeight + 8, { width: 515, align: "center" });
-    
+
     return footerY + totalFooterHeight;
   }
 
@@ -4621,7 +5245,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payroll-report/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Payroll Reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -4666,7 +5290,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const doc = new PDFDocument({ margin: 30, size: 'A4', bufferPages: true });
       const monthNames = ["January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December"];
-      
+
       let currentY = 30;
       const headerStartY = currentY;
 
@@ -4674,7 +5298,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const leftBounds = { x: 40, width: 90 };
       const centerBounds = { x: 140, width: 240 };
       const rightBounds = { x: 390, width: 165 };
-      
+
       let maxHeaderHeight = 0;
 
       // LEFT: Logo
@@ -4737,7 +5361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       doc.save();
       doc.roundedRect(rightBounds.x, rightY, rightBounds.width, boxHeight, 3)
-         .fillAndStroke("#f7f8fa", "#d6dae2");
+        .fillAndStroke("#f7f8fa", "#d6dae2");
       doc.restore();
 
       rightY += boxPadding;
@@ -4782,10 +5406,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (let i = 0; i < 3; i++) {
         const card = summaryCards[i];
         const xPos = i === 0 ? cardX1 : i === 1 ? cardX2 : cardX3;
-        
+
         doc.save();
         doc.roundedRect(xPos, summaryStartY, cardWidth, cardHeight, 4)
-           .fillAndStroke("#f7f8fa", "#d6dae2");
+          .fillAndStroke("#f7f8fa", "#d6dae2");
         doc.restore();
 
         doc.fontSize(9).font("Helvetica").fillColor("#6b7280");
@@ -4800,10 +5424,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (let i = 3; i < 6; i++) {
         const card = summaryCards[i];
         const xPos = (i - 3) === 0 ? cardX1 : (i - 3) === 1 ? cardX2 : cardX3;
-        
+
         doc.save();
         doc.roundedRect(xPos, row2Y, cardWidth, cardHeight, 4)
-           .fillAndStroke("#f7f8fa", "#d6dae2");
+          .fillAndStroke("#f7f8fa", "#d6dae2");
         doc.restore();
 
         doc.fontSize(9).font("Helvetica").fillColor("#6b7280");
@@ -4844,7 +5468,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Start new page for next row
           doc.addPage();
           currentY = 40;
-          
+
           // Re-draw table header on new page
           doc.save();
           doc.rect(tableX, currentY, totalTableWidth, 32).fillAndStroke(BRAND_COLORS.primary, BRAND_COLORS.primary);
@@ -4870,13 +5494,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ]);
 
         const bgColor = isEven ? "#fbfbfb" : "#ffffff";
-        
+
         doc.save();
         doc.rect(tableX, currentY, totalTableWidth, 28).fillAndStroke(bgColor, "#e5e7eb");
         doc.restore();
 
         doc.fontSize(9).font("Helvetica").fillColor(BRAND_COLORS.black);
-        
+
         colX = tableX + 8;
         const rowData = [
           { text: record.user?.fullName || "Unknown", align: "left" as const },
@@ -4889,7 +5513,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rowData.forEach((item, i) => {
           if (item.bold) doc.font("Helvetica-Bold");
           else doc.font("Helvetica");
-          
+
           const width = colWidths[i] - 16;
           doc.text(item.text, colX, currentY + 8, { width, align: item.align });
           colX += colWidths[i];
@@ -4952,7 +5576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payroll-report/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Payroll Reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -5120,7 +5744,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payroll-report/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Payroll Reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -5188,7 +5812,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               alignment: AlignmentType.CENTER,
               spacing: { after: 400 }
             }),
-            
+
             // Report Title
             new Paragraph({
               children: [new TextRun({ text: "Payroll Report", bold: true, size: 28, color: "E11D26" })],
@@ -5238,7 +5862,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             new Paragraph({
               children: [
                 new TextRun({ text: "Net Payroll Cost: ", bold: true, size: 28 }),
-                new TextRun({ 
+                new TextRun({
                   text: formatCurrency(totalNetSalary),
                   bold: true,
                   size: 28,
@@ -5294,13 +5918,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       new TableCell({ children: [new Paragraph({ text: formatCurrency(record.payroll.basicSalary || "0"), alignment: AlignmentType.RIGHT })] }),
                       new TableCell({ children: [new Paragraph({ text: formatCurrency(record.payroll.totalAllowances || "0"), alignment: AlignmentType.RIGHT })] }),
                       new TableCell({ children: [new Paragraph({ text: formatCurrency(totalDed), alignment: AlignmentType.RIGHT })] }),
-                      new TableCell({ children: [new Paragraph({ 
-                        children: [new TextRun({ 
-                          text: formatCurrency(record.payroll.netSalary || "0"), 
-                          bold: true
-                        })], 
-                        alignment: AlignmentType.RIGHT 
-                      })] }),
+                      new TableCell({
+                        children: [new Paragraph({
+                          children: [new TextRun({
+                            text: formatCurrency(record.payroll.netSalary || "0"),
+                            bold: true
+                          })],
+                          alignment: AlignmentType.RIGHT
+                        })]
+                      }),
                       new TableCell({ children: [new Paragraph({ text: record.payroll.status || "draft", alignment: AlignmentType.CENTER })] })
                     ]
                   });
@@ -5345,7 +5971,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/salary-sheet", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access Salary Sheet
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -5399,7 +6025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/salary-sheet/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Salary Sheet
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -5441,10 +6067,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(employees.status, "active"));
 
       // Calculate totals using Decimal.js with null-safe handling
-      const totalBasic = sumAmounts(salaryRecords.map(r => 
+      const totalBasic = sumAmounts(salaryRecords.map(r =>
         r.payroll?.basicSalary || r.salaryStructure?.basicSalary || "0"
       ));
-      const totalAllowances = sumAmounts(salaryRecords.map(r => 
+      const totalAllowances = sumAmounts(salaryRecords.map(r =>
         r.payroll?.totalAllowances || sumAmounts([
           r.salaryStructure?.houseAllowance || "0",
           r.salaryStructure?.foodAllowance || "0",
@@ -5478,11 +6104,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const totalEmployees = salaryRecords.length;
 
       // ========== PROFESSIONAL PAYROLL PDF - A4 LANDSCAPE ==========
-      const doc = new PDFDocument({ 
-        margin: 30, 
-        size: 'A4', 
+      const doc = new PDFDocument({
+        margin: 30,
+        size: 'A4',
         layout: 'landscape', // Landscape for wide salary sheet
-        bufferPages: true 
+        bufferPages: true
       });
 
       const monthNames = ["January", "February", "March", "April", "May", "June",
@@ -5495,7 +6121,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // ========== PROFESSIONAL HEADER ==========
       let currentY = margin;
-      
+
       // Company Logo (Left)
       try {
         const logoPath = "attached_assets/Untitled design (1)_1763794635122.png";
@@ -5508,13 +6134,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const headerCenterX = margin + 120;
       doc.fontSize(16).font("Helvetica-Bold").fillColor("#E11D26");
       doc.text("MaxTech BD", headerCenterX, currentY, { width: 500, align: "center" });
-      
+
       doc.fontSize(9).font("Helvetica").fillColor("#333333");
       doc.text("522, SK Mujib Road (4th Floor), Agrabad, Double Mooring, Chattogram, Bangladesh", headerCenterX, currentY + 18, { width: 500, align: "center" });
       doc.text("Phone: +8801843180008 | Email: info@maxtechbd.com", headerCenterX, currentY + 30, { width: 500, align: "center" });
 
       currentY += 50;
-      
+
       // Separator line
       doc.moveTo(margin, currentY).lineTo(pageWidth - margin, currentY).strokeColor("#E5E7EB").lineWidth(1).stroke();
       currentY += 15;
@@ -5560,11 +6186,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Helper function to draw table header
       const drawTableHeader = (y: number): number => {
         doc.rect(tableX, y, tableWidth, rowHeight).fillAndStroke("#E11D26", "#E11D26");
-        
+
         doc.fontSize(7).font("Helvetica-Bold").fillColor("#FFFFFF");
         let headerX = tableX;
         const headerY = y + 7;
-        
+
         doc.text("Emp Code", headerX + cellPadding, headerY, { width: colWidths[0] - (cellPadding * 2), lineBreak: false }); headerX += colWidths[0];
         doc.text("Name", headerX + cellPadding, headerY, { width: colWidths[1] - (cellPadding * 2), lineBreak: false }); headerX += colWidths[1];
         doc.text("Dept", headerX + cellPadding, headerY, { width: colWidths[2] - (cellPadding * 2), lineBreak: false }); headerX += colWidths[2];
@@ -5584,7 +6210,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         doc.text("Loan", headerX + cellPadding, headerY, { width: colWidths[16] - (cellPadding * 2), align: "right", lineBreak: false }); headerX += colWidths[16];
         doc.text("Oth Ded", headerX + cellPadding, headerY, { width: colWidths[17] - (cellPadding * 2), align: "right", lineBreak: false }); headerX += colWidths[17];
         doc.text("Net Pay", headerX + cellPadding, headerY, { width: colWidths[18] - (cellPadding * 2), align: "right", lineBreak: false });
-        
+
         return y + rowHeight;
       };
 
@@ -5593,13 +6219,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Employee rows with detailed breakdown
       let isEven = false;
-      
+
       // Calculate grand totals for all columns
       let totalHRA = "0", totalMedical = "0", totalConv = "0", totalOtherAllow = "0", totalGross = "0";
       let totalLateDeduct = "0", totalLoanDeduct = "0", totalOtherDeduct = "0";
       let totalPresentDays = 0, totalAbsentDays = 0, totalLateDays = 0, totalHalfDays = 0;
       let totalOTHours: number = 0;
-      
+
       salaryRecords.forEach((record) => {
         // Check if new page needed
         if (currentY > pageHeight - 80) {
@@ -5618,21 +6244,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           record.salaryStructure?.foodAllowance || "0",
           record.salaryStructure?.otherAllowances || "0"
         ]);
-        
+
         const grossSalary = sumAmounts([basicSalary, houseAllowance, medicalAllowance, travelAllowance, otherAllowances]);
-        
+
         // Attendance data
         const presentDays = record.payroll?.totalPresentDays || 0;
         const absentDays = record.payroll?.totalAbsentDays || 0;
         const lateDays = record.payroll?.totalLateDays || 0;
         const halfDays = record.payroll?.totalHalfDays || 0;
         const otHours = Number(record.payroll?.totalOvertimeHours || 0);
-        
+
         // Deductions breakdown
         const lateDeduction = record.payroll?.lateDeduction || "0";
         const loanDeduction = record.payroll?.loanDeduction || "0";
         const otherDeductions = record.payroll?.otherDeductions || "0";
-        
+
         const netSalary = record.payroll?.netSalary || sumAmounts([grossSalary, `-${lateDeduction}`, `-${loanDeduction}`, `-${otherDeductions}`]);
 
         // Accumulate totals
@@ -5657,13 +6283,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         doc.fontSize(7).font("Helvetica").fillColor("#1E1E1E");
         let xPos = tableX;
         const textY = currentY + 8;
-        
+
         // Employee info
         doc.text(record.employee?.employeeId || "N/A", xPos + cellPadding, textY, { width: colWidths[0] - (cellPadding * 2), lineBreak: false }); xPos += colWidths[0];
         doc.text(record.user?.fullName || "Unknown", xPos + cellPadding, textY, { width: colWidths[1] - (cellPadding * 2), lineBreak: false }); xPos += colWidths[1];
         doc.text(record.department?.name || "N/A", xPos + cellPadding, textY, { width: colWidths[2] - (cellPadding * 2), lineBreak: false }); xPos += colWidths[2];
         doc.text(record.designation?.title || "N/A", xPos + cellPadding, textY, { width: colWidths[3] - (cellPadding * 2), lineBreak: false }); xPos += colWidths[3];
-        
+
         // Earnings (right-aligned, no currency prefix)
         doc.text(formatCurrency(basicSalary, { prefix: '' }), xPos + cellPadding, textY, { width: colWidths[4] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[4];
         doc.text(formatCurrency(houseAllowance, { prefix: '' }), xPos + cellPadding, textY, { width: colWidths[5] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[5];
@@ -5672,7 +6298,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         doc.text(formatCurrency(otherAllowances, { prefix: '' }), xPos + cellPadding, textY, { width: colWidths[8] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[8];
         doc.font("Helvetica-Bold");
         doc.text(formatCurrency(grossSalary, { prefix: '' }), xPos + cellPadding, textY, { width: colWidths[9] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[9];
-        
+
         // Attendance (center-aligned)
         doc.font("Helvetica");
         doc.text(presentDays.toString(), xPos + cellPadding, textY, { width: colWidths[10] - (cellPadding * 2), align: "center", lineBreak: false }); xPos += colWidths[10];
@@ -5680,12 +6306,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         doc.text(lateDays.toString(), xPos + cellPadding, textY, { width: colWidths[12] - (cellPadding * 2), align: "center", lineBreak: false }); xPos += colWidths[12];
         doc.text(halfDays.toString(), xPos + cellPadding, textY, { width: colWidths[13] - (cellPadding * 2), align: "center", lineBreak: false }); xPos += colWidths[13];
         doc.text(otHours.toFixed(2), xPos + cellPadding, textY, { width: colWidths[14] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[14];
-        
+
         // Deductions (right-aligned, no currency prefix)
         doc.text(formatCurrency(lateDeduction, { prefix: '' }), xPos + cellPadding, textY, { width: colWidths[15] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[15];
         doc.text(formatCurrency(loanDeduction, { prefix: '' }), xPos + cellPadding, textY, { width: colWidths[16] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[16];
         doc.text(formatCurrency(otherDeductions, { prefix: '' }), xPos + cellPadding, textY, { width: colWidths[17] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[17];
-        
+
         // Net Pay (bold, right-aligned, no currency prefix)
         doc.font("Helvetica-Bold").fillColor("#E11D26");
         doc.text(formatCurrency(netSalary, { prefix: '' }), xPos + cellPadding, textY, { width: colWidths[18] - (cellPadding * 2), align: "right", lineBreak: false });
@@ -5700,10 +6326,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       doc.fontSize(8).font("Helvetica-Bold").fillColor("#1E1E1E");
       let xPos = tableX;
       const totalsY = currentY + 9;
-      
-      doc.text("TOTALS", xPos + cellPadding, totalsY, { width: colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] - (cellPadding * 2), lineBreak: false }); 
+
+      doc.text("TOTALS", xPos + cellPadding, totalsY, { width: colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] - (cellPadding * 2), lineBreak: false });
       xPos += colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3];
-      
+
       doc.text(formatCurrency(totalBasic, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[4] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[4];
       doc.text(formatCurrency(totalHRA, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[5] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[5];
       doc.text(formatCurrency(totalMedical, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[6] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[6];
@@ -5711,18 +6337,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       doc.text(formatCurrency(totalOtherAllow, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[8] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[8];
       doc.fillColor("#E11D26");
       doc.text(formatCurrency(totalGross, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[9] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[9];
-      
+
       doc.fillColor("#1E1E1E");
       doc.text(totalPresentDays.toString(), xPos + cellPadding, totalsY, { width: colWidths[10] - (cellPadding * 2), align: "center", lineBreak: false }); xPos += colWidths[10];
       doc.text(totalAbsentDays.toString(), xPos + cellPadding, totalsY, { width: colWidths[11] - (cellPadding * 2), align: "center", lineBreak: false }); xPos += colWidths[11];
       doc.text(totalLateDays.toString(), xPos + cellPadding, totalsY, { width: colWidths[12] - (cellPadding * 2), align: "center", lineBreak: false }); xPos += colWidths[12];
       doc.text(totalHalfDays.toString(), xPos + cellPadding, totalsY, { width: colWidths[13] - (cellPadding * 2), align: "center", lineBreak: false }); xPos += colWidths[13];
       doc.text(totalOTHours.toFixed(2), xPos + cellPadding, totalsY, { width: colWidths[14] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[14];
-      
+
       doc.text(formatCurrency(totalLateDeduct, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[15] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[15];
       doc.text(formatCurrency(totalLoanDeduct, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[16] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[16];
       doc.text(formatCurrency(totalOtherDeduct, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[17] - (cellPadding * 2), align: "right", lineBreak: false }); xPos += colWidths[17];
-      
+
       doc.fillColor("#E11D26").fontSize(9);
       doc.text(formatCurrency(totalNetSalary, { prefix: '' }), xPos + cellPadding, totalsY, { width: colWidths[18] - (cellPadding * 2), align: "right", lineBreak: false });
 
@@ -5730,11 +6356,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // ========== SIGNATURE SECTION ==========
       currentY += 20;
-      
+
       // Three signature lines
       const signatureLineWidth = 150;
       const sectionWidth = contentWidth / 3;
-      
+
       const sig1X = margin + (sectionWidth / 2) - (signatureLineWidth / 2);
       const sig2X = margin + sectionWidth + (sectionWidth / 2) - (signatureLineWidth / 2);
       const sig3X = margin + (sectionWidth * 2) + (sectionWidth / 2) - (signatureLineWidth / 2);
@@ -5755,7 +6381,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // ========== FOOTER ==========
       doc.moveTo(margin, currentY).lineTo(pageWidth - margin, currentY).strokeColor("#E5E7EB").lineWidth(1).stroke();
-      
+
       doc.fontSize(8).font("Helvetica").fillColor("#999999");
       doc.text(
         "MaxTech BD | Smart Agency Control Hub",
@@ -5778,7 +6404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/salary-sheet/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Salary Sheet
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -5820,10 +6446,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(employees.status, "active"));
 
       // Calculate totals
-      const totalBasic = sumAmounts(salaryRecords.map(r => 
+      const totalBasic = sumAmounts(salaryRecords.map(r =>
         r.payroll?.basicSalary || r.salaryStructure?.basicSalary || "0"
       ));
-      const totalAllowances = sumAmounts(salaryRecords.map(r => 
+      const totalAllowances = sumAmounts(salaryRecords.map(r =>
         r.payroll?.totalAllowances || sumAmounts([
           r.salaryStructure?.houseAllowance || "0",
           r.salaryStructure?.foodAllowance || "0",
@@ -5876,7 +6502,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Add header with branding
       const monthNames = ["January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December"];
-      
+
       worksheet.mergeCells('A1:J1');
       const titleRow = worksheet.getCell('A1');
       titleRow.value = COMPANY_INFO.name;
@@ -5903,7 +6529,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Add column headers
       const headerRow = worksheet.addRow([
-        'Employee Name', 'Employee ID', 'Department', 'Designation', 
+        'Employee Name', 'Employee ID', 'Department', 'Designation',
         'Basic Salary', 'Allowances', 'Deductions', 'Overtime', 'Net Salary', 'Payment Status'
       ]);
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -5998,7 +6624,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/salary-sheet/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export Salary Sheet
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -6041,10 +6667,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Calculate totals
       const totalEmployees = salaryRecords.length;
-      const totalBasic = sumAmounts(salaryRecords.map(r => 
+      const totalBasic = sumAmounts(salaryRecords.map(r =>
         r.payroll?.basicSalary || r.salaryStructure?.basicSalary || "0"
       ));
-      const totalAllowances = sumAmounts(salaryRecords.map(r => 
+      const totalAllowances = sumAmounts(salaryRecords.map(r =>
         r.payroll?.totalAllowances || sumAmounts([
           r.salaryStructure?.houseAllowance || "0",
           r.salaryStructure?.foodAllowance || "0",
@@ -6216,13 +6842,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       new TableCell({ children: [new Paragraph({ text: formatCurrency(basicSalary), alignment: AlignmentType.RIGHT })] }),
                       new TableCell({ children: [new Paragraph({ text: formatCurrency(allowances), alignment: AlignmentType.RIGHT })] }),
                       new TableCell({ children: [new Paragraph({ text: formatCurrency(deductions), alignment: AlignmentType.RIGHT })] }),
-                      new TableCell({ children: [new Paragraph({ 
-                        children: [new TextRun({ 
-                          text: formatCurrency(netSalary), 
-                          bold: true
-                        })], 
-                        alignment: AlignmentType.RIGHT 
-                      })] }),
+                      new TableCell({
+                        children: [new Paragraph({
+                          children: [new TextRun({
+                            text: formatCurrency(netSalary),
+                            bold: true
+                          })],
+                          alignment: AlignmentType.RIGHT
+                        })]
+                      }),
                       new TableCell({ children: [new Paragraph({ text: status, alignment: AlignmentType.CENTER })] })
                     ]
                   });
@@ -6306,7 +6934,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/salary-slip", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access salary slips
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -6393,7 +7021,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/salary-slip/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export salary slips
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -6454,7 +7082,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Compact header (no template - custom compact design)
       // Header background
       doc.rect(0, 0, 595, 70).fill("#F8F9FA");
-      
+
       // Company Logo (smaller)
       try {
         const path = await import("path");
@@ -6463,7 +7091,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.warn("Logo not found");
       }
-      
+
       // Company name and info (compact - right side)
       doc.fontSize(12).font("Helvetica-Bold").fillColor("#E11D26").text("MaxTech BD", 400, 18, { width: 155, align: "right" });
       doc.fontSize(7).font("Helvetica").fillColor("#444444")
@@ -6585,7 +7213,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ["Late:", (payrollRecord.totalLateDays ?? 0).toString()],
         ["OT Hours:", payrollRecord.totalOvertimeHours || "0"]
       ];
-      
+
       attData.forEach(([label, value], i) => {
         const xPos = 40 + i * 130;
         doc.fontSize(8).font("Helvetica").fillColor("#666666").text(label, xPos, currentY, { width: 45 });
@@ -6636,7 +7264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/salary-slip/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export salary slips
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -6883,7 +7511,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/salary-slip/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export salary slips
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -7165,11 +7793,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               rows: [
                 new TableRow({
                   children: [
-                    new TableCell({ 
+                    new TableCell({
                       children: [new Paragraph({ children: [new TextRun({ text: "NET SALARY", bold: true, size: 28, color: "FFFFFF" })], alignment: AlignmentType.LEFT })],
                       shading: { fill: "E11D26" }
                     }),
-                    new TableCell({ 
+                    new TableCell({
                       children: [new Paragraph({ children: [new TextRun({ text: formatCurrency(payrollRecord.netSalary || "0"), bold: true, size: 28, color: "FFFFFF" })], alignment: AlignmentType.RIGHT })],
                       shading: { fill: "E11D26" }
                     })
@@ -7195,7 +7823,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               rows: [
                 new TableRow({
                   children: [
-                    new TableCell({ 
+                    new TableCell({
                       children: [
                         new Paragraph({ text: "_____________________", alignment: AlignmentType.CENTER, spacing: { before: 600 } }),
                         new Paragraph({ text: "Employee Signature", alignment: AlignmentType.CENTER, spacing: { before: 100 } })
@@ -7207,7 +7835,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                         right: { style: BorderStyle.NONE }
                       }
                     }),
-                    new TableCell({ 
+                    new TableCell({
                       children: [
                         new Paragraph({ text: "_____________________", alignment: AlignmentType.CENTER, spacing: { before: 600 } }),
                         new Paragraph({ text: "Authorized Signature", alignment: AlignmentType.CENTER, spacing: { before: 100 } })
@@ -7276,11 +7904,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!user?.clientId) {
           return res.status(403).json({ error: "No client associated with this account" });
         }
-        
+
         // Get all invoices for this client first
         const clientInvoices = await db.select().from(invoices).where(eq(invoices.clientId, user.clientId));
         const invoiceIds = clientInvoices.map(inv => inv.id);
-        
+
         if (invoiceIds.length > 0) {
           // Use inArray for safe parameter binding (prevents SQL injection)
           allPayments = await db.select().from(payments)
@@ -7326,11 +7954,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const data = insertPaymentSchema.partial().parse(req.body);
       const [payment] = await db.update(payments).set(data).where(eq(payments.id, req.params.id)).returning();
-      
+
       if (!payment) {
         return res.status(404).json({ error: "Payment not found" });
       }
-      
+
       res.json(payment);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -7345,11 +7973,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const [payment] = await db.delete(payments).where(eq(payments.id, req.params.id)).returning();
-      
+
       if (!payment) {
         return res.status(404).json({ error: "Payment not found" });
       }
-      
+
       res.json({ message: "Payment deleted successfully" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -7360,7 +7988,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payment-receipt", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access payment receipts
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -7412,7 +8040,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payment-receipt/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export payment receipts
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -7454,7 +8082,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Generate PDF using pdfkit with professional design matching Invoice/Salary Sheet
-      const doc = new PDFDocument({ 
+      const doc = new PDFDocument({
         margin: 40,
         size: 'A4',
         bufferPages: true
@@ -7499,7 +8127,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const headerBottom = 120;
       doc.x = doc.page.margins.left;
       doc.y = headerBottom + 20;
-      
+
       doc.fontSize(20).font("Helvetica-Bold").fillColor("#111827");
       doc.text("PAYMENT RECEIPT", 40, headerBottom + 20, { width: 515, align: "center" });
 
@@ -7519,7 +8147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Save the baseline Y for both columns
       const rowTop = currentY;
       const cardHeight = 120;
-      
+
       // Left Column - Payment Information
       doc.save();
       doc.rect(40, rowTop, 250, cardHeight).stroke("#E5E7EB");
@@ -7601,7 +8229,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ===== TOTAL AMOUNT PAID - Highlighted (centered and balanced) =====
       const totalBoxWidth = 220;
       const totalBoxX = (595 - totalBoxWidth) / 2; // Center the box on the page
-      
+
       doc.save();
       doc.rect(totalBoxX, currentY - 5, totalBoxWidth, 40).fillAndStroke("#F3F4F6", "#E5E7EB");
       doc.restore();
@@ -7634,19 +8262,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ===== SIGNATURE SECTION =====
       currentY += 20;
       const signatureY = Math.min(currentY, 600); // Ensure signatures stay on first page
-      
+
       doc.fontSize(10).font("Helvetica").fillColor("#111827");
-      
+
       // Draw professional signature lines
       const sig1X = 100;
       const sig2X = 350;
       const lineLength = 130;
-      
+
       doc.save();
       doc.moveTo(sig1X, signatureY).lineTo(sig1X + lineLength, signatureY).strokeColor("#374151").lineWidth(1).stroke();
       doc.moveTo(sig2X, signatureY).lineTo(sig2X + lineLength, signatureY).strokeColor("#374151").lineWidth(1).stroke();
       doc.restore();
-      
+
       doc.text("Received By", sig1X, signatureY + 10, { width: lineLength, align: "center" });
       doc.text("Authorized Signature", sig2X, signatureY + 10, { width: lineLength, align: "center" });
 
@@ -7655,10 +8283,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       doc.save();
       doc.moveTo(40, footerY)
-         .lineTo(555, footerY)
-         .strokeColor("#E5E7EB")
-         .lineWidth(1)
-         .stroke();
+        .lineTo(555, footerY)
+        .strokeColor("#E5E7EB")
+        .lineWidth(1)
+        .stroke();
       doc.restore();
 
       doc.fontSize(8).font("Helvetica").fillColor("#6B7280");
@@ -7687,7 +8315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payment-receipt/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export payment receipts
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -7827,7 +8455,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payment-receipt/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export payment receipts
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -8040,7 +8668,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/hr-attendance-report", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can view attendance reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -8081,12 +8709,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         departmentId: employees.departmentId,
         departmentName: sql<string>`CASE WHEN ${departments.id} IS NULL THEN 'N/A' ELSE ${departments.name} END`.as('departmentName'),
       })
-      .from(attendance)
-      .innerJoin(users, eq(attendance.userId, users.id))
-      .leftJoin(employees, eq(users.id, employees.userId))
-      .leftJoin(departments, eq(employees.departmentId, departments.id))
-      .where(and(...whereConditions))
-      .orderBy(attendance.date);
+        .from(attendance)
+        .innerJoin(users, eq(attendance.userId, users.id))
+        .leftJoin(employees, eq(users.id, employees.userId))
+        .leftJoin(departments, eq(employees.departmentId, departments.id))
+        .where(and(...whereConditions))
+        .orderBy(attendance.date);
 
       // Format attendance data for frontend
       // Note: COALESCE in SQL query handles null values, so no need for fallbacks here
@@ -8142,12 +8770,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       attendanceData.forEach(record => {
         // Only calculate hours if both check-in and check-out times exist
-        if (record.checkInTime && record.checkOutTime && 
-            record.checkInTime.trim() !== "" && record.checkOutTime.trim() !== "") {
+        if (record.checkInTime && record.checkOutTime &&
+          record.checkInTime.trim() !== "" && record.checkOutTime.trim() !== "") {
           try {
             const checkIn = new Date(`2000-01-01 ${record.checkInTime}`);
             const checkOut = new Date(`2000-01-01 ${record.checkOutTime}`);
-            
+
             // Validate that dates are valid
             if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime())) {
               const hours = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
@@ -8198,19 +8826,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/hr-attendance-report/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export attendance reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
       const reportData = JSON.parse(decodeURIComponent(req.query.data as string));
-      const isEmployeeJobCard = reportData.attendanceData.length > 0 && 
+      const isEmployeeJobCard = reportData.attendanceData.length > 0 &&
         reportData.attendanceData.every((r: any) => r.employeeId === reportData.attendanceData[0].employeeId);
 
       const doc = new PDFDocument({ margin: 25, size: 'A4' });
-      const fileName = isEmployeeJobCard 
+      const fileName = isEmployeeJobCard
         ? `Job-Card-${reportData.attendanceData[0]?.employeeName?.replace(/\s+/g, '-')}-${format(new Date(), "yyyy-MM-dd")}.pdf`
         : `Attendance-Report-${format(new Date(), "yyyy-MM-dd")}.pdf`;
-      
+
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
       doc.pipe(res);
@@ -8218,14 +8846,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ===== PROFESSIONAL HEADER SECTION (Non-Overlapping Bounds) =====
       let currentY = 30;
       const headerStartY = currentY;
-      
+
       // Define explicit bounding boxes to prevent overlap
       const leftBounds = { x: 40, width: 80 };        // Logo section
       const centerBounds = { x: 125, width: 270 };    // Company details  
       const rightBounds = { x: 405, width: 150 };     // Job card info
-      
+
       let maxHeaderHeight = 0;
-      
+
       // ===== LEFT: Logo =====
       let logoHeight = 70;
       try {
@@ -8240,94 +8868,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ===== CENTER: Company Details =====
       let centerY = headerStartY;
       let centerHeight = 0;
-      
+
       // Company name
       doc.fontSize(16).font("Helvetica-Bold").fillColor(BRAND_COLORS.primary);
       const companyNameHeight = doc.heightOfString("MAXTECH BD", { width: centerBounds.width, align: "center" });
       doc.text("MAXTECH BD", centerBounds.x, centerY, { width: centerBounds.width, align: "center" });
       centerY += companyNameHeight + 5;
       centerHeight += companyNameHeight + 5;
-      
+
       // Address line 1
       doc.fontSize(9).font("Helvetica").fillColor(BRAND_COLORS.black);
       const addr1Height = doc.heightOfString("522, SK Mujib Road (4th Floor)", { width: centerBounds.width, align: "center" });
       doc.text("522, SK Mujib Road (4th Floor)", centerBounds.x, centerY, { width: centerBounds.width, align: "center" });
       centerY += addr1Height + 2;
       centerHeight += addr1Height + 2;
-      
+
       // Address line 2
       const addr2Height = doc.heightOfString("Agrabad, Double Mooring, Chattogram", { width: centerBounds.width, align: "center" });
       doc.text("Agrabad, Double Mooring, Chattogram", centerBounds.x, centerY, { width: centerBounds.width, align: "center" });
       centerY += addr2Height + 3;
       centerHeight += addr2Height + 3;
-      
+
       // Contact info
       doc.fontSize(8).font("Helvetica").fillColor(BRAND_COLORS.gray);
       const contactHeight = doc.heightOfString("Phone: +8801843180008", { width: centerBounds.width, align: "center" });
       doc.text("Phone: +8801843180008 | Email: support@maxtechbd.com", centerBounds.x, centerY, { width: centerBounds.width, align: "center" });
       centerHeight += contactHeight;
-      
+
       maxHeaderHeight = Math.max(maxHeaderHeight, centerHeight);
 
       // ===== RIGHT: Job Card Info Box =====
       let rightY = headerStartY;
       let rightHeight = 0;
-      
+
       // Measure actual text heights for box content
       const boxPadding = 10;
       const boxInnerWidth = rightBounds.width - (2 * boxPadding);
-      
+
       doc.fontSize(10).font("Helvetica-Bold");
       const titleText = isEmployeeJobCard ? "Employee Job Card" : "Attendance Report";
       const titleHeight = doc.heightOfString(titleText, { width: boxInnerWidth, align: "center" });
-      
+
       doc.fontSize(7).font("Helvetica");
       const periodText = `Period: ${reportData.dateRange.start} – ${reportData.dateRange.end}`;
       const periodHeight = doc.heightOfString(periodText, { width: boxInnerWidth, align: "center" });
-      
+
       const generatedText = `Generated: ${format(new Date(), "MMM dd, yyyy")}`;
       const generatedHeight = doc.heightOfString(generatedText, { width: boxInnerWidth, align: "center" });
-      
+
       // Calculate total box height based on measured content
       const lineSpacing = 4;
       const boxHeight = boxPadding + titleHeight + lineSpacing + periodHeight + lineSpacing + generatedHeight + boxPadding;
-      
+
       // Draw box background
       doc.save();
       doc.roundedRect(rightBounds.x, rightY, rightBounds.width, boxHeight, 3)
-         .fillAndStroke("#f8f9fa", "#d1d5db");
+        .fillAndStroke("#f8f9fa", "#d1d5db");
       doc.restore();
-      
+
       rightY += boxPadding;
-      
+
       // Title
       doc.fontSize(10).font("Helvetica-Bold").fillColor(BRAND_COLORS.primary);
-      doc.text(titleText, rightBounds.x + boxPadding, rightY, { 
-        width: boxInnerWidth, 
+      doc.text(titleText, rightBounds.x + boxPadding, rightY, {
+        width: boxInnerWidth,
         align: "center",
         lineBreak: false
       });
       rightY += titleHeight + lineSpacing;
-      
+
       // Period
       doc.fontSize(7).font("Helvetica").fillColor("#6b7280");
-      doc.text(periodText, rightBounds.x + boxPadding, rightY, { 
-        width: boxInnerWidth, 
+      doc.text(periodText, rightBounds.x + boxPadding, rightY, {
+        width: boxInnerWidth,
         align: "center",
         lineBreak: false
       });
       rightY += periodHeight + lineSpacing;
-      
+
       // Generated date
-      doc.text(generatedText, rightBounds.x + boxPadding, rightY, { 
-        width: boxInnerWidth, 
+      doc.text(generatedText, rightBounds.x + boxPadding, rightY, {
+        width: boxInnerWidth,
         align: "center",
         lineBreak: false
       });
-      
+
       rightHeight = boxHeight;
       maxHeaderHeight = Math.max(maxHeaderHeight, rightHeight);
-      
+
       // Advance cursor by maximum header height
       currentY = headerStartY + maxHeaderHeight + 15;
 
@@ -8340,12 +8968,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Full-width professional box with subtle grey background
         doc.save();
         doc.roundedRect(40, currentY, 515, 70, 4)
-           .fillAndStroke("#f5f5f5", "#d1d5db");
+          .fillAndStroke("#f5f5f5", "#d1d5db");
         doc.restore();
 
         // Employee details in clean horizontal layout
         const infoY = currentY + 20;
-        
+
         // Employee Name (Primary Info)
         doc.fontSize(11).font("Helvetica").fillColor("#6b7280");
         doc.text("EMPLOYEE NAME", 55, infoY, { width: 120 });
@@ -8397,21 +9025,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Card with professional border and subtle background
         doc.save();
         doc.roundedRect(x, y, cardWidth, cardHeight, 4)
-           .fillAndStroke("#fafafa", "#e0e0e0");
+          .fillAndStroke("#fafafa", "#e0e0e0");
         doc.restore();
 
         // Label (small, uppercase, grey)
         doc.fontSize(9).font("Helvetica").fillColor("#6b7280");
-        doc.text(item.label.toUpperCase(), x + 12, y + 15, { 
-          width: cardWidth - 24, 
-          align: "left" 
+        doc.text(item.label.toUpperCase(), x + 12, y + 15, {
+          width: cardWidth - 24,
+          align: "left"
         });
 
         // Value (large, bold, colored)
         doc.fontSize(20).font("Helvetica-Bold").fillColor(item.color);
-        doc.text(String(item.value), x + 12, y + 32, { 
-          width: cardWidth - 24, 
-          align: "left" 
+        doc.text(String(item.value), x + 12, y + 32, {
+          width: cardWidth - 24,
+          align: "left"
         });
       });
 
@@ -8423,23 +9051,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       currentY += 25;
 
       // Table columns
-      const columns = isEmployeeJobCard 
+      const columns = isEmployeeJobCard
         ? [
-            { label: "Date", width: 90, align: "left" as const },
-            { label: "Day", width: 70, align: "left" as const },
-            { label: "Check In", width: 85, align: "left" as const },
-            { label: "Check Out", width: 85, align: "left" as const },
-            { label: "Status", width: 105, align: "left" as const },
-            { label: "Hours", width: 80, align: "right" as const },
-          ]
+          { label: "Date", width: 90, align: "left" as const },
+          { label: "Day", width: 70, align: "left" as const },
+          { label: "Check In", width: 85, align: "left" as const },
+          { label: "Check Out", width: 85, align: "left" as const },
+          { label: "Status", width: 105, align: "left" as const },
+          { label: "Hours", width: 80, align: "right" as const },
+        ]
         : [
-            { label: "Date", width: 85, align: "left" as const },
-            { label: "Employee", width: 120, align: "left" as const },
-            { label: "Dept", width: 90, align: "left" as const },
-            { label: "Status", width: 80, align: "center" as const },
-            { label: "Check In", width: 70, align: "center" as const },
-            { label: "Check Out", width: 70, align: "center" as const },
-          ];
+          { label: "Date", width: 85, align: "left" as const },
+          { label: "Employee", width: 120, align: "left" as const },
+          { label: "Dept", width: 90, align: "left" as const },
+          { label: "Status", width: 80, align: "center" as const },
+          { label: "Check In", width: 70, align: "center" as const },
+          { label: "Check Out", width: 70, align: "center" as const },
+        ];
 
       // Table header with professional styling
       let tableY = currentY;
@@ -8457,9 +9085,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       doc.fontSize(10).font("Helvetica-Bold").fillColor(BRAND_COLORS.black);
       let headerX = tableX + 8;
       columns.forEach(col => {
-        doc.text(col.label, headerX, tableY + 10, { 
-          width: col.width - 16, 
-          align: col.align 
+        doc.text(col.label, headerX, tableY + 10, {
+          width: col.width - 16,
+          align: col.align
         });
         headerX += col.width;
       });
@@ -8471,7 +9099,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (tableY > 730) {
           doc.addPage();
           tableY = 50;
-          
+
           // Repeat header on new page
           doc.save();
           doc.rect(tableX, tableY, totalWidth, headerHeight).fill("#f5f5f5");
@@ -8481,9 +9109,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           doc.fontSize(10).font("Helvetica-Bold").fillColor(BRAND_COLORS.black);
           let repeatHeaderX = tableX + 8;
           columns.forEach(col => {
-            doc.text(col.label, repeatHeaderX, tableY + 10, { 
-              width: col.width - 16, 
-              align: col.align 
+            doc.text(col.label, repeatHeaderX, tableY + 10, {
+              width: col.width - 16,
+              align: col.align
             });
             repeatHeaderX += col.width;
           });
@@ -8515,23 +9143,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const dayOfWeek = format(new Date(record.date), "EEE");
 
         // Row data
-        const rowData = isEmployeeJobCard 
+        const rowData = isEmployeeJobCard
           ? [
-              { text: record.date, width: 90, align: "left" as const, bold: false },
-              { text: dayOfWeek, width: 70, align: "left" as const, bold: false },
-              { text: record.checkInTime || "-", width: 85, align: "left" as const, bold: false },
-              { text: record.checkOutTime || "-", width: 85, align: "left" as const, bold: false },
-              { text: record.status, width: 105, align: "left" as const, bold: true },
-              { text: hoursWorked, width: 80, align: "right" as const, bold: false },
-            ]
+            { text: record.date, width: 90, align: "left" as const, bold: false },
+            { text: dayOfWeek, width: 70, align: "left" as const, bold: false },
+            { text: record.checkInTime || "-", width: 85, align: "left" as const, bold: false },
+            { text: record.checkOutTime || "-", width: 85, align: "left" as const, bold: false },
+            { text: record.status, width: 105, align: "left" as const, bold: true },
+            { text: hoursWorked, width: 80, align: "right" as const, bold: false },
+          ]
           : [
-              { text: record.date, width: 85, align: "left" as const, bold: false },
-              { text: record.employeeName, width: 120, align: "left" as const, bold: false },
-              { text: record.department, width: 90, align: "left" as const, bold: false },
-              { text: record.status, width: 80, align: "center" as const, bold: true },
-              { text: record.checkInTime || "-", width: 70, align: "center" as const, bold: false },
-              { text: record.checkOutTime || "-", width: 70, align: "center" as const, bold: false },
-            ];
+            { text: record.date, width: 85, align: "left" as const, bold: false },
+            { text: record.employeeName, width: 120, align: "left" as const, bold: false },
+            { text: record.department, width: 90, align: "left" as const, bold: false },
+            { text: record.status, width: 80, align: "center" as const, bold: true },
+            { text: record.checkInTime || "-", width: 70, align: "center" as const, bold: false },
+            { text: record.checkOutTime || "-", width: 70, align: "center" as const, bold: false },
+          ];
 
         // Row text
         doc.fontSize(9).fillColor(BRAND_COLORS.black);
@@ -8542,9 +9170,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             doc.font("Helvetica");
           }
-          doc.text(col.text, rowX, tableY + 9, { 
-            width: col.width - 16, 
-            align: col.align 
+          doc.text(col.text, rowX, tableY + 9, {
+            width: col.width - 16,
+            align: col.align
           });
           rowX += col.width;
         });
@@ -8555,10 +9183,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ===== PROFESSIONAL FOOTER =====
       const footerY = 770;
       doc.moveTo(40, footerY).lineTo(555, footerY).strokeColor(BRAND_COLORS.border).lineWidth(1).stroke();
-      
+
       doc.fontSize(9).font("Helvetica-Bold").fillColor(BRAND_COLORS.black);
       doc.text("MaxTech BD | Smart Agency Control Hub", 40, footerY + 12, { width: 515, align: "center" });
-      
+
       doc.fontSize(8).font("Helvetica").fillColor(BRAND_COLORS.gray);
       doc.text("Developed by MaxTech BD IT Team", 40, footerY + 26, { width: 515, align: "center" });
 
@@ -8573,12 +9201,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/hr-attendance-report/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export attendance reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
       const reportData = JSON.parse(decodeURIComponent(req.query.data as string));
-      const isEmployeeJobCard = reportData.attendanceData.length > 0 && 
+      const isEmployeeJobCard = reportData.attendanceData.length > 0 &&
         reportData.attendanceData.every((r: any) => r.employeeId === reportData.attendanceData[0].employeeId);
 
       const workbook = new ExcelJS.Workbook();
@@ -8664,14 +9292,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         worksheet.getCell(`A${row + idx}`).value = dataRow[0];
         worksheet.getCell(`A${row + idx}`).font = { bold: true };
         worksheet.getCell(`A${row + idx}`).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
-        
+
         worksheet.getCell(`B${row + idx}`).value = dataRow[1];
         worksheet.getCell(`B${row + idx}`).font = { bold: true, size: 12 };
-        
+
         worksheet.getCell(`C${row + idx}`).value = dataRow[2];
         worksheet.getCell(`C${row + idx}`).font = { bold: true };
         worksheet.getCell(`C${row + idx}`).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
-        
+
         worksheet.mergeCells(`D${row + idx}:${maxCol}${row + idx}`);
         worksheet.getCell(`D${row + idx}`).value = dataRow[3];
         worksheet.getCell(`D${row + idx}`).font = { bold: true, size: 12 };
@@ -8754,7 +9382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           worksheet.getCell(`F${row}`).value = hoursWorked;
           worksheet.getCell(`F${row}`).alignment = { horizontal: "center" };
           worksheet.getCell(`G${row}`).value = record.notes || "";
-          
+
           ["A", "B", "C", "D", "E", "F", "G"].forEach(col => {
             const cell = worksheet.getCell(`${col}${row}`);
             cell.border = {
@@ -8793,10 +9421,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // Color code status
-        const statusColor = record.status.toLowerCase() === "present" ? "FF10B981" : 
-                           record.status.toLowerCase() === "late" ? "FFF59E0B" : 
-                           record.status.toLowerCase() === "half-day" ? "FF3B82F6" :
-                           "FFEF4444";
+        const statusColor = record.status.toLowerCase() === "present" ? "FF10B981" :
+          record.status.toLowerCase() === "late" ? "FFF59E0B" :
+            record.status.toLowerCase() === "half-day" ? "FF3B82F6" :
+              "FFEF4444";
         worksheet.getCell(`${isEmployeeJobCard ? "E" : "D"}${row}`).font = { color: { argb: statusColor }, bold: true };
 
         row++;
@@ -8820,7 +9448,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         worksheet.getColumn("F").width = 12;
       }
 
-      const fileName = isEmployeeJobCard 
+      const fileName = isEmployeeJobCard
         ? `Job-Card-${reportData.attendanceData[0]?.employeeName?.replace(/\s+/g, '-')}-${format(new Date(), "yyyy-MM-dd")}.xlsx`
         : `Attendance-Report-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
 
@@ -8838,7 +9466,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/hr-attendance-report/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export attendance reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -8869,7 +9497,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               alignment: AlignmentType.CENTER,
               spacing: { after: 400 }
             }),
-            
+
             // Report Title
             new Paragraph({
               children: [new TextRun({ text: "HR Attendance Report", bold: true, size: 28, color: "E11D26" })],
@@ -8983,10 +9611,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const buffer = await Packer.toBuffer(doc);
-      const isEmployeeJobCard = reportData.attendanceData.length > 0 && 
+      const isEmployeeJobCard = reportData.attendanceData.length > 0 &&
         reportData.attendanceData.every((r: any) => r.employeeId === reportData.attendanceData[0].employeeId);
-      
-      const fileName = isEmployeeJobCard 
+
+      const fileName = isEmployeeJobCard
         ? `Job-Card-${reportData.attendanceData[0]?.employeeName?.replace(/\s+/g, '-')}-${format(new Date(), "yyyy-MM-dd")}.docx`
         : `Attendance-Report-${format(new Date(), "yyyy-MM-dd")}.docx`;
 
@@ -9003,7 +9631,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/leave-summary-report", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can view leave summary reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -9020,7 +9648,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(employees)
         .leftJoin(users, eq(employees.userId, users.id))
         .leftJoin(departments, eq(employees.departmentId, departments.id));
-      
+
       if (employeeId && employeeId !== "all") {
         employeeQuery = employeeQuery.where(eq(employees.id, employeeId as string)) as any;
       }
@@ -9108,7 +9736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/leave-summary-report/export-pdf", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export leave summary reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -9120,7 +9748,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       doc.pipe(res);
 
       // Add header
-      addReportHeader(doc, "Leave Summary Report");
+      addReportHeader({ doc, title: "Leave Summary Report" });
       doc.fontSize(10).fillColor("#666666")
         .text(`Year: ${reportData.year}`, { align: "center" })
         .moveDown(2);
@@ -9141,35 +9769,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tableTop = doc.y;
       const headers = ["Employee", "Dept", "Type", "Total", "Used", "Remaining", "Pending", "Approved", "Rejected"];
       const columnWidths = [80, 60, 70, 40, 40, 50, 45, 50, 50];
-      
-      createTableHeader(doc, headers, columnWidths, tableTop);
-      
+
+      const columns = headers.map((header, i) => ({
+        label: header,
+        width: columnWidths[i]
+      }));
+
+      createTableHeader(doc, tableTop, columns);
+
       let y = tableTop + 25;
       reportData.leaveSummaryData.forEach((record: any, index: number) => {
         if (y > 700) {
           doc.addPage();
           y = 50;
-          createTableHeader(doc, headers, columnWidths, y);
+          createTableHeader(doc, y, columns);
           y += 25;
         }
 
-        createTableRow(
-          doc,
-          [
-            record.employeeName,
-            record.department,
-            record.leaveType,
-            record.totalDays,
-            record.usedDays,
-            record.remainingDays,
-            record.pendingRequests.toString(),
-            record.approvedRequests.toString(),
-            record.rejectedRequests.toString()
-          ],
-          columnWidths,
-          y,
-          index % 2 === 0
-        );
+        const rowValues = [
+          record.employeeName,
+          record.department,
+          record.leaveType,
+          record.totalDays,
+          record.usedDays,
+          record.remainingDays,
+          record.pendingRequests.toString(),
+          record.approvedRequests.toString(),
+          record.rejectedRequests.toString()
+        ];
+
+        const rowColumns = rowValues.map((text, i) => ({
+          text,
+          width: columnWidths[i]
+        }));
+
+        createTableRow(doc, y, rowColumns, index % 2 === 0);
         y += 20;
       });
 
@@ -9186,7 +9820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/leave-summary-report/export-excel", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export leave summary reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -9301,7 +9935,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/leave-summary-report/export-word", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can export leave summary reports
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -9332,7 +9966,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               alignment: AlignmentType.CENTER,
               spacing: { after: 400 }
             }),
-            
+
             // Report Title
             new Paragraph({
               children: [new TextRun({ text: "Leave Summary Report", bold: true, size: 28, color: "E11D26" })],
@@ -9384,47 +10018,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 new TableRow({
                   children: [
                     new TableCell({
-                      children: [new Paragraph({ text: "Employee", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Employee", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 15, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Department", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Department", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 12, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Leave Type", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Leave Type", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 13, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Total", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Total", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 10, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Used", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Used", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 10, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Remaining", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Remaining", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 10, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Pending", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Pending", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 10, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Approved", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Approved", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 10, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Rejected", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Rejected", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 10, type: WidthType.PERCENTAGE }
                     })
@@ -9479,11 +10113,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!user?.clientId) {
           return res.status(403).json({ error: "No client associated with this account" });
         }
-        
+
         // Get all projects for this client
         const clientProjects = await db.select().from(projects).where(eq(projects.clientId, user.clientId));
         const projectIds = clientProjects.map(p => p.id);
-        
+
         if (projectIds.length > 0) {
           // Use inArray for safe parameter binding (prevents SQL injection)
           allFiles = await db.select().from(files)
@@ -9508,7 +10142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const projectId = req.body.projectId || null;
-      
+
       // CLIENT SECURITY: Clients must provide projectId and can only upload to their own projects
       if (req.userRole === "client") {
         if (!projectId) {
@@ -9519,13 +10153,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!user?.clientId) {
           return res.status(403).json({ error: "No client associated with this user" });
         }
-        
+
         // Verify client owns this project
         const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
         if (!project) {
           return res.status(404).json({ error: "Project not found" });
         }
-        
+
         if (project.clientId !== user.clientId) {
           return res.status(403).json({ error: "Access denied: You can only upload files to your own projects" });
         }
@@ -9541,12 +10175,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const [file] = await db.insert(files).values(data).returning();
-      
+
       // Create notifications for project members if file is associated with a project
       if (projectId) {
         await notificationService.notifyFileUpload(projectId, req.userId!, req.file.originalname);
       }
-      
+
       res.json(file);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -9556,7 +10190,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/files/:id/download", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const [file] = await db.select().from(files).where(eq(files.id, req.params.id)).limit(1);
-      
+
       if (!file) {
         return res.status(404).json({ error: "File not found" });
       }
@@ -9590,10 +10224,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Set appropriate headers
       res.setHeader("Content-Disposition", `attachment; filename="${file.fileName}"`);
       res.setHeader("Content-Type", file.fileType || "application/octet-stream");
-      
+
       // Stream the file with error handling
       const fileStream = (await import("fs")).createReadStream(file.fileUrl);
-      
+
       fileStream.on("error", (error) => {
         console.error("Error streaming file:", error);
         if (!res.headersSent) {
@@ -9610,7 +10244,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/files/:id", authenticateToken, auditMiddleware("delete", "file"), async (req: AuthRequest, res) => {
     try {
       const [file] = await db.select().from(files).where(eq(files.id, req.params.id)).limit(1);
-      
+
       if (!file) {
         return res.status(404).json({ error: "File not found" });
       }
@@ -9630,7 +10264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Delete from database
       await db.delete(files).where(eq(files.id, req.params.id));
-      
+
       res.json({ message: "File deleted successfully" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -9683,7 +10317,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // Get user's clientId
       const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
-      
+
       if (!user?.clientId) {
         return res.status(403).json({ error: "No client associated with this user" });
       }
@@ -9770,7 +10404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const data = { ...req.body };
-      
+
       // Handle thumbnail upload
       if (req.file) {
         const uploadDir = "uploads/thumbnails";
@@ -9783,7 +10417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       data.createdBy = req.userId;
 
       const validated = insertProjectCredentialsSchema.parse(data);
-      
+
       const [newCredential] = await db
         .insert(projectCredentials)
         .values(validated)
@@ -9815,14 +10449,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const data = { ...req.body };
-      
+
       // Handle thumbnail upload
       if (req.file) {
         const uploadDir = "uploads/thumbnails";
         await fs.mkdir(uploadDir, { recursive: true });
         const newPath = path.join(uploadDir, `${Date.now()}-${req.file.originalname}`);
         await fs.rename(req.file.path, newPath);
-        
+
         // Delete old thumbnail if it exists
         if (existing.thumbnailUrl) {
           try {
@@ -9831,7 +10465,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.error("Error deleting old thumbnail:", e);
           }
         }
-        
+
         data.thumbnailUrl = newPath;
       }
 
@@ -9878,7 +10512,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       await db.delete(projectCredentials).where(eq(projectCredentials.id, req.params.id));
-      
+
       res.json({ message: "Project credential deleted successfully" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -9895,10 +10529,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const projectId = req.query.projectId as string;
       console.log("🔵 GET /api/messages - User:", req.userId, "Role:", req.userRole, "ProjectId:", projectId);
-      
+
       // UNIFIED INBOX: Return enriched messages with client/project info
       let allMessages;
-      
+
       // CLIENT SECURITY: Clients can only view messages for their own projects
       if (req.userRole === "client") {
         // Get user's clientId
@@ -9906,18 +10540,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!user?.clientId) {
           return res.status(403).json({ error: "No client associated with this user" });
         }
-        
+
         if (projectId) {
           // Verify client owns this specific project
           const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
           if (!project) {
             return res.status(404).json({ error: "Project not found" });
           }
-          
+
           if (project.clientId !== user.clientId) {
             return res.status(403).json({ error: "Access denied: You can only view messages for your own projects" });
           }
-          
+
           // Fetch messages for this specific project (single project view)
           allMessages = await db
             .select({
@@ -9946,13 +10580,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // This shows BOTH client messages AND admin/team replies
           const clientProjects = await db.select({ id: projects.id }).from(projects).where(eq(projects.clientId, user.clientId));
           const projectIds = clientProjects.map(p => p.id);
-          
+
           console.log("🔵 Client unified inbox - fetching messages for", projectIds.length, "projects");
-          
+
           if (projectIds.length === 0) {
             return res.json([]);
           }
-          
+
           // Fetch all messages from all client's projects
           allMessages = await db
             .select({
@@ -9976,13 +10610,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .leftJoin(users, eq(messages.userId, users.id))
             .where(sql`${messages.projectId} = ANY(ARRAY[${sql.join(projectIds.map(id => sql`${id}`), sql`, `)}])`)
             .orderBy(asc(messages.createdAt));
-          
+
           console.log("✅ Client unified inbox: Fetched", allMessages.length, "messages from", projectIds.length, "projects");
         }
-        
+
         return res.json(allMessages);
       }
-      
+
       if (projectId) {
         // Single project view (for clients or specific project)
         allMessages = await db
@@ -10009,16 +10643,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .orderBy(asc(messages.createdAt));
       } else {
         // Unified inbox (for developers/admins/ops only) - all assigned projects
-        
+
         // SECURITY: For admins and operational heads, get all projects
         // For developers, get only assigned projects via tasks
         let projectIds: string[];
-        
+
         if (req.userRole === "admin" || req.userRole === "operational_head") {
           // Admins/ops can see all projects
           const allProjects = await db.select({ id: projects.id }).from(projects);
           projectIds = allProjects.map(p => p.id);
-          
+
           // SECURITY: If no projects exist at all, return empty
           if (projectIds.length === 0) {
             return res.json([]);
@@ -10029,21 +10663,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .select({ projectId: tasks.projectId })
             .from(tasks)
             .where(eq(tasks.assignedTo, req.userId!));
-          
+
           console.log("🔍 Developer assigned tasks:", assignedTasks);
-          
+
           const uniqueProjectIds = new Set(assignedTasks.map(t => t.projectId));
           projectIds = Array.from(uniqueProjectIds);
-          
+
           console.log("🔍 Developer project IDs:", projectIds);
-          
+
           // SECURITY: If developer has no assigned projects, return empty immediately
           if (projectIds.length === 0) {
             console.log("❌ Developer has no assigned projects, returning empty");
             return res.json([]);
           }
         }
-        
+
         // Get all messages from accessible projects with enriched data
         // Use inArray from drizzle-orm for safer array handling
         console.log("🔄 Fetching messages for project IDs:", projectIds);
@@ -10069,10 +10703,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .leftJoin(users, eq(messages.userId, users.id))
           .where(sql`${messages.projectId} = ANY(ARRAY[${sql.join(projectIds.map(id => sql`${id}`), sql`, `)}])`)
           .orderBy(asc(messages.createdAt));
-        
+
         console.log("✅ Fetched", allMessages.length, "messages");
       }
-      
+
       console.log("📤 Returning", allMessages.length, "messages");
       res.json(allMessages);
     } catch (error: any) {
@@ -10083,7 +10717,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/messages", authenticateToken, auditMiddleware("create", "message"), async (req: AuthRequest, res) => {
     try {
       const data = insertMessageSchema.parse(req.body);
-      
+
       // CLIENT SECURITY: Clients can only send messages to their own projects
       if (req.userRole === "client") {
         // Get user's clientId
@@ -10091,29 +10725,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!user?.clientId) {
           return res.status(403).json({ error: "No client associated with this user" });
         }
-        
+
         // Verify client owns this project
         const [project] = await db.select().from(projects).where(eq(projects.id, data.projectId)).limit(1);
         if (!project) {
           return res.status(404).json({ error: "Project not found" });
         }
-        
+
         if (project.clientId !== user.clientId) {
           return res.status(403).json({ error: "Access denied: You can only send messages to your own projects" });
         }
       }
-      
+
       const [message] = await db.insert(messages).values({
         ...data,
         userId: req.userId!,
       }).returning();
-      
+
       // Broadcast message via WebSocket to all project subscribers
       wsService.broadcastMessage(data.projectId, message);
-      
+
       // Create notifications for project members
       await notificationService.notifyNewMessage(data.projectId, req.userId!, data.content);
-      
+
       res.json(message);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -10142,21 +10776,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ];
       if (!allowedMimeTypes.includes(req.file.mimetype)) {
         // Delete uploaded file
-        await fs.unlink(req.file.path).catch(() => {});
+        await fs.unlink(req.file.path).catch(() => { });
         return res.status(400).json({ error: "File type not allowed. Only images and documents (PDF, DOC, DOCX, TXT) are supported" });
       }
 
       // SECURITY: Validate file size - max 10MB
       const maxSize = 10 * 1024 * 1024; // 10MB
       if (req.file.size > maxSize) {
-        await fs.unlink(req.file.path).catch(() => {});
+        await fs.unlink(req.file.path).catch(() => { });
         return res.status(400).json({ error: "File size exceeds 10MB limit" });
       }
 
       // Verify project exists
       const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
       if (!project) {
-        await fs.unlink(req.file.path).catch(() => {});
+        await fs.unlink(req.file.path).catch(() => { });
         return res.status(404).json({ error: "Project not found" });
       }
 
@@ -10165,12 +10799,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.userRole === "client") {
         const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
         if (!user?.clientId) {
-          await fs.unlink(req.file.path).catch(() => {});
+          await fs.unlink(req.file.path).catch(() => { });
           return res.status(403).json({ error: "No client associated with this user" });
         }
-        
+
         if (project.clientId !== user.clientId) {
-          await fs.unlink(req.file.path).catch(() => {});
+          await fs.unlink(req.file.path).catch(() => { });
           return res.status(403).json({ error: "Access denied: You can only upload files to your own projects" });
         }
       } else if (req.userRole === "developer" || req.userRole === "operational_head") {
@@ -10179,10 +10813,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .select({ projectId: tasks.projectId })
           .from(tasks)
           .where(eq(tasks.assignedTo, req.userId!));
-        
+
         const hasAccess = assignedTasks.some(task => task.projectId === projectId);
         if (!hasAccess) {
-          await fs.unlink(req.file.path).catch(() => {});
+          await fs.unlink(req.file.path).catch(() => { });
           return res.status(403).json({ error: "Access denied: You can only upload files to projects you're assigned to" });
         }
       }
@@ -10200,7 +10834,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sanitizedName = fileNameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_');
       const uniqueFileName = `${sanitizedName}_${Date.now()}${fileExtension}`;
       const targetPath = path.join(chatUploadsDir, uniqueFileName);
-      
+
       await fs.rename(req.file.path, targetPath);
 
       const fileUrl = `/uploads/chat/${uniqueFileName}`;
@@ -10215,18 +10849,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileName: originalFileName,
         fileType,
       }).returning();
-      
+
       // Broadcast message via WebSocket with guaranteed projectId
       wsService.broadcastMessage(message.projectId, message);
-      
+
       // Create notification for file upload
       await notificationService.notifyNewMessage(message.projectId, req.userId!, `📎 ${originalFileName}`);
-      
+
       res.json(message);
     } catch (error: any) {
       // Clean up uploaded file on error
       if (req.file?.path) {
-        await fs.unlink(req.file.path).catch(() => {});
+        await fs.unlink(req.file.path).catch(() => { });
       }
       res.status(400).json({ error: error.message });
     }
@@ -10240,7 +10874,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(notifications)
         .where(eq(notifications.userId, req.userId!))
         .orderBy(desc(notifications.createdAt));
-      
+
       res.json(userNotifications);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -10254,13 +10888,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.userRole !== "admin" && req.userRole !== "operational_head") {
         return res.status(403).json({ error: "Only admins can create notifications manually" });
       }
-      
+
       const data = insertNotificationSchema.parse(req.body);
       const [notification] = await db.insert(notifications).values(data).returning();
-      
+
       // Broadcast notification via WebSocket to the recipient
       wsService.broadcastNotification(notification.userId, notification);
-      
+
       res.json(notification);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -10270,27 +10904,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/notifications/:id/read", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const notificationId = req.params.id;
-      
+
       // Verify the notification belongs to the current user
       const [notification] = await db.select()
         .from(notifications)
         .where(eq(notifications.id, notificationId))
         .limit(1);
-      
+
       if (!notification) {
         return res.status(404).json({ error: "Notification not found" });
       }
-      
+
       if (notification.userId !== req.userId) {
         return res.status(403).json({ error: "Access denied: This is not your notification" });
       }
-      
+
       // Mark as read
       const [updated] = await db.update(notifications)
         .set({ isRead: true })
         .where(eq(notifications.id, notificationId))
         .returning();
-      
+
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -10307,7 +10941,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           eq(notifications.userId, req.userId!),
           eq(notifications.isRead, false)
         ));
-      
+
       res.json({ success: true, message: "All notifications marked as read" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -10318,10 +10952,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/audit-logs", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access audit logs
-      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+      if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
       }
-      
+
       const logs = await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(100);
       res.json(logs);
     } catch (error: any) {
@@ -10334,9 +10968,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerHrPayrollRoutes(app, db, authenticateToken, auditMiddleware);
 
   const httpServer = createServer(app);
-  
+
   // Initialize WebSocket server
   wsService.initialize(httpServer);
-  
+
   return httpServer;
 }

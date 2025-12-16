@@ -1,11 +1,15 @@
 import { db } from "../db";
 import { leads, invoices, users, clients } from "@shared/schema";
 import { eq, and, lte, gte, sql } from "drizzle-orm";
-import { emailService } from "./email";
 import { attendanceSyncService } from "./attendanceSync";
 
 class SchedulerService {
   private intervals: NodeJS.Timeout[] = [];
+  private emailService: any;
+
+  constructor(emailService: any) {
+    this.emailService = emailService;
+  }
 
   start() {
     // Check for lead follow-ups every hour
@@ -90,7 +94,7 @@ class SchedulerService {
           continue;
         }
 
-        const emailSent = await emailService.sendLeadFollowUp({ ...lead, assignedUser });
+        const emailSent = await this.emailService.sendLeadFollowUp({ ...lead, assignedUser });
         
         if (emailSent) {
           // Update last reminder timestamp
@@ -153,7 +157,7 @@ class SchedulerService {
           continue;
         }
 
-        const emailSent = await emailService.sendInvoiceReminder({ ...invoice, client });
+        const emailSent = await this.emailService.sendInvoiceReminder({ ...invoice, client });
         
         if (emailSent) {
           // Update last reminder timestamp
@@ -187,4 +191,6 @@ class SchedulerService {
   }
 }
 
-export const schedulerService = new SchedulerService();
+export function createSchedulerService(emailService: any) {
+  return new SchedulerService(emailService);
+}

@@ -12,7 +12,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { UserPlus, Edit, Trash2, Users, Mail, Shield, Search } from "lucide-react";
+import { UserPlus, Edit, Trash2, Users, Mail, Shield, Search, Plus } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
 
 type User = {
   id: string;
@@ -32,7 +36,7 @@ type Client = {
 const userSchema = z.object({
   fullName: z.string().min(1, "Full name is required"),
   email: z.string().email("Invalid email address"),
-  role: z.enum(["admin", "operational_head", "developer", "client"]),
+  role: z.string().min(1, "Role is required"),
   clientId: z.string().optional(),
   password: z.string().min(6, "Password must be at least 6 characters"),
 }).refine(
@@ -52,10 +56,24 @@ const userSchema = z.object({
 const updateUserSchema = z.object({
   fullName: z.string().min(1, "Full name is required"),
   email: z.string().email("Invalid email address"),
-  role: z.enum(["admin", "operational_head", "developer", "client"]),
+  role: z.string().min(1, "Role is required"),
   clientId: z.string().optional(),
   password: z.string().optional(),
 });
+
+type RoleConfig = {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+};
+
+type Resource = {
+  id: string;
+  name: string;
+  paths: string[];
+};
+
 
 type UserFormData = z.infer<typeof userSchema>;
 type UpdateUserFormData = z.infer<typeof updateUserSchema>;
@@ -99,6 +117,42 @@ export default function Team() {
       password: "",
     },
   });
+
+  const { data: dynamicRoles } = useQuery<RoleConfig[]>({ queryKey: ["/api/roles"] });
+  const { data: resources } = useQuery<Resource[]>({ queryKey: ["/api/resources"] });
+  const [createRoleOpen, setCreateRoleOpen] = useState(false);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleDesc, setNewRoleDesc] = useState("");
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
+
+  const createRoleMutation = useMutation({
+    mutationFn: async (data: { name: string; description: string; permissions: string[] }) => {
+      return apiRequest("POST", "/api/roles", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/roles"] });
+      setCreateRoleOpen(false);
+      setNewRoleName("");
+      setNewRoleDesc("");
+      setSelectedPermissions([]);
+      toast({ title: "Success", description: "Role created successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  });
+
+  const handleCreateRole = () => {
+    if (!newRoleName) {
+      toast({ title: "Error", description: "Role name is required", variant: "destructive" });
+      return;
+    }
+    createRoleMutation.mutate({
+      name: newRoleName,
+      description: newRoleDesc,
+      permissions: selectedPermissions
+    });
+  };
 
   const editForm = useForm<UpdateUserFormData>({
     resolver: zodResolver(updateUserSchema),
@@ -151,7 +205,7 @@ export default function Team() {
   const onEditSubmit = (data: UpdateUserFormData) => {
     if (!editingUser) return;
     const updates: Partial<UpdateUserFormData> = {};
-    
+
     if (data.fullName !== editingUser.fullName) updates.fullName = data.fullName;
     if (data.email !== editingUser.email) updates.email = data.email;
     if (data.role !== editingUser.role) updates.role = data.role;
@@ -181,7 +235,7 @@ export default function Team() {
 
   const filteredUsers = users?.filter(user => {
     const matchesSearch = user.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         user.email.toLowerCase().includes(searchQuery.toLowerCase());
+      user.email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = roleFilter === "all" || user.role === roleFilter;
     return matchesSearch && matchesRole;
   }) || [];
@@ -268,6 +322,18 @@ export default function Team() {
                             <SelectItem value="operational_head">Operational Head</SelectItem>
                             <SelectItem value="developer">Developer</SelectItem>
                             <SelectItem value="client">Client</SelectItem>
+                            {dynamicRoles?.map(role => (
+                              <SelectItem key={role.id} value={role.name}>{role.name}</SelectItem>
+                            ))}
+                            <div className="p-2 border-t mt-1">
+                              <Button size="sm" variant="secondary" className="w-full text-xs" onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation(); // Prevent select closing
+                                setCreateRoleOpen(true);
+                              }}>
+                                <Plus className="w-3 h-3 mr-1" /> Create New Role
+                              </Button>
+                            </div>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -313,6 +379,52 @@ export default function Team() {
             </DialogContent>
           </Dialog>
         </div>
+
+        {/* Create Role Dialog */}
+        <Dialog open={createRoleOpen} onOpenChange={setCreateRoleOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create Dynamic Role</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Role Name</Label>
+                <Input placeholder="e.g. Project Manager" value={newRoleName} onChange={e => setNewRoleName(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea placeholder="Describe the role..." value={newRoleDesc} onChange={e => setNewRoleDesc(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Permissions (Allowed Routes)</Label>
+                <div className="grid grid-cols-2 gap-2 border p-3 rounded-md">
+                  {resources?.map(resource => (
+                    <div key={resource.id} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={resource.id}
+                        checked={selectedPermissions.includes(resource.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedPermissions([...selectedPermissions, resource.id]);
+                          } else {
+                            setSelectedPermissions(selectedPermissions.filter(p => p !== resource.id));
+                          }
+                        }}
+                      />
+                      <Label htmlFor={resource.id} className="text-sm cursor-pointer">{resource.name}</Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setCreateRoleOpen(false)}>Cancel</Button>
+                <Button onClick={handleCreateRole} disabled={createRoleMutation.isPending}>
+                  {createRoleMutation.isPending ? "Creating..." : "Create Role"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Stats Cards */}
         <div className="grid gap-4 md:grid-cols-4">
@@ -497,25 +609,57 @@ export default function Team() {
                 <FormField
                   control={editForm.control}
                   name="role"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Role</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-edit-role">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent position="popper">
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="operational_head">Operational Head</SelectItem>
-                          <SelectItem value="developer">Developer</SelectItem>
-                          <SelectItem value="client">Client</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                  render={({ field }) => {
+                    const getRolePermissionsDisplay = (roleName: string) => {
+                      if (roleName === "admin") return ["Full System Access"];
+                      if (roleName === "operational_head") return ["Full System Access (Operational)"];
+                      if (roleName === "developer") return ["Dashboard", "Tasks", "Projects", "Files", "Users"];
+                      if (roleName === "client") return ["Dashboard", "Projects"];
+
+                      const role = dynamicRoles?.find(r => r.name === roleName);
+                      if (!role || !role.permissions) return [];
+
+                      return role.permissions.map(p => resources?.find(r => r.id === p)?.name || p);
+                    };
+
+                    const selectedRolePermissions = getRolePermissionsDisplay(field.value);
+
+                    return (
+                      <FormItem>
+                        <FormLabel>Role</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-edit-role">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent position="popper">
+                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="operational_head">Operational Head</SelectItem>
+                            <SelectItem value="developer">Developer</SelectItem>
+                            <SelectItem value="client">Client</SelectItem>
+                            {dynamicRoles?.map(role => (
+                              <SelectItem key={role.id} value={role.name}>{role.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        {selectedRolePermissions.length > 0 && (
+                          <div className="mt-2 p-3 bg-muted/50 rounded-md text-sm border">
+                            <span className="font-semibold block mb-1 text-xs uppercase text-muted-foreground">Access Rights:</span>
+                            <div className="flex flex-wrap gap-1">
+                              {selectedRolePermissions.map((perm, i) => (
+                                <Badge key={i} variant="secondary" className="text-xs font-normal">
+                                  {perm}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <FormMessage />
+                      </FormItem>
+                    );
+                  }}
                 />
                 {editForm.watch("role") === "client" && (
                   <FormField
@@ -556,6 +700,6 @@ export default function Team() {
           </DialogContent>
         </Dialog>
       </div>
-    </div>
+    </div >
   );
 }

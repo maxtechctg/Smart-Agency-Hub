@@ -1,4 +1,6 @@
+// src/services/emailService.ts
 import nodemailer from "nodemailer";
+import type { Transporter } from "nodemailer";
 import type { Task, Invoice, Lead, User } from "@shared/schema";
 
 interface EmailConfig {
@@ -10,23 +12,26 @@ interface EmailConfig {
     pass: string;
   };
   tls?: {
-    rejectUnauthorized: boolean;
+    rejectUnauthorized?: boolean;
   };
 }
 
-class EmailService {
-  private transporter: nodemailer.Transporter | null = null;
-  private from: string = "MaxTech BD <info@maxtechbd.com>";
-  
+export class EmailService {
+  private transporter: Transporter | null = null;
+  private defaultFrom = "MaxTech BD <info@maxtechbd.com>";
+
+  constructor() {
+    // No auto initialization here. Call init() after envs are loaded.
+  }
+
   private getFromAddress(): string {
-    // Use SMTP user email as "from" address for better deliverability
-    const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER;
+    const smtpUser = (process.env.SMTP_USER || process.env.EMAIL_USER || "").trim();
     if (smtpUser) {
       return `MaxTech BD <${smtpUser}>`;
     }
-    return this.from;
+    return this.defaultFrom;
   }
-  
+
   private getEmailFooter(): string {
     return `
       <div style="background: #f3f4f6; padding: 20px; text-align: center; margin-top: 20px; border-top: 3px solid #C8102E;">
@@ -42,84 +47,96 @@ class EmailService {
     `;
   }
 
-  constructor() {
-    this.initialize();
-  }
-
-  private async initialize() {
-    // Support both SMTP_ and EMAIL_ prefixes for flexibility
-    const emailHost = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com";
-    const emailPort = parseInt(process.env.SMTP_PORT || process.env.EMAIL_PORT || "587");
-    const emailUser = process.env.SMTP_USER || process.env.EMAIL_USER;
-    const emailPass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+  /** Initialize transporter — call this after environment variables are loaded */
+  public async init(): Promise<void> {
+    const emailHost = (process.env.SMTP_HOST || process.env.EMAIL_HOST || "maxtechbd.com").trim();
+    const emailPort = parseInt(process.env.SMTP_PORT || process.env.EMAIL_PORT || "465", 10);
+    const emailUser = (process.env.SMTP_USER || process.env.EMAIL_USER || "").trim();
+    const emailPass = process.env.SMTP_PASS || process.env.EMAIL_PASS || "";
 
     if (!emailUser || !emailPass) {
-      console.warn("Email credentials not configured. Email notifications disabled.");
+      console.warn("Email credentials not configured (SMTP_USER/SMTP_PASS). Email notifications disabled.");
+      this.transporter = null;
       return;
     }
 
-    // Some shared hosting providers use certificates for their main domain
-    // Set SMTP_IGNORE_TLS=true only if you trust your mail server
     const ignoreTls = process.env.SMTP_IGNORE_TLS === "true";
-    
-    const config: any = {
+
+    const config: EmailConfig = {
       host: emailHost,
       port: emailPort,
       secure: emailPort === 465,
-      connectionTimeout: 10000, // 10 seconds timeout
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-    };
-    
-    if (ignoreTls) {
-      config.tls = { rejectUnauthorized: false };
-      console.log("Warning: TLS certificate validation disabled for SMTP");
-    }
-
-    if (emailUser && emailPass) {
-      config.auth = {
+      auth: {
         user: emailUser,
         pass: emailPass,
-      };
+      },
+    };
+
+    if (ignoreTls) {
+      console.warn("SMTP_IGNORE_TLS=true — TLS certificate validation is DISABLED. Remove in production.");
+      config.tls = { rejectUnauthorized: false };
     }
 
     try {
-      console.log(`Connecting to SMTP: ${emailHost}:${emailPort} as ${emailUser}`);
-      this.transporter = nodemailer.createTransport(config);
-      if (this.transporter) {
-        await this.transporter.verify();
-        console.log(`Email service initialized successfully (from: ${emailUser})`);
-      }
-    } catch (error: any) {
-      console.error("Failed to initialize email service:", error?.message || error);
-      // Don't null the transporter - try to send anyway
-      // Some servers don't support SMTP verify but still accept mail
-      console.log("Will attempt to send emails despite verify failure");
+      console.log(`Attempting to create transporter for ${config.host}:${config.port} (secure=${config.secure}) as ${emailUser}`);
+      this.transporter = nodemailer.createTransport({
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        auth: config.auth,
+        tls: config.tls,
+        connectionTimeout: 15000,
+        greetingTimeout: 10000,
+        socketTimeout: 20000,
+        logger: process.env.NODE_ENV !== "production",
+        debug: process.env.NODE_ENV !== "production",
+      });
+
+      await this.transporter.verify();
+      console.log(`Email service initialized and verified (from: ${emailUser})`);
+    } catch (err: any) {
+      console.error("Failed to verify SMTP connection:", err && err.message ? err.message : err);
+      this.transporter = null;
     }
   }
 
-  private async sendEmail(to: string, subject: string, html: string) {
+  private async sendEmail(to: string | null, subject: string, html: string) {
+    if (!to) {
+      console.warn(`Email not sent: recipient address is null or empty (subject: ${subject})`);
+      return false;
+    }
+
     if (!this.transporter) {
-      console.warn(`Email not sent to ${to}: Email service not configured`);
+      console.warn(`Email not sent to ${to}: transporter not configured`);
       return false;
     }
 
     try {
-      await this.transporter.sendMail({
+      const info = await this.transporter.sendMail({
         from: this.getFromAddress(),
         to,
         subject,
         html,
       });
-      console.log(`Email sent to ${to}: ${subject}`);
+      console.log(`Email sent to ${to}: messageId=${(info && (info as any).messageId) || "unknown"}`);
       return true;
-    } catch (error) {
-      console.error(`Failed to send email to ${to}:`, error);
+    } catch (error: any) {
+      console.error(`Failed to send email to ${to}:`, error && error.message ? error.message : error);
+      if (process.env.NODE_ENV !== "production") {
+        console.error(error);
+      }
       return false;
     }
   }
 
+  // ---------- Templates and public methods (full HTML preserved) ----------
+
   async sendTaskAssignment(task: Task & { project?: { name: string } }, assignee: User) {
+    if (!assignee?.email) {
+      console.warn("Cannot send task assignment: assignee email missing");
+      return false;
+    }
+
     const subject = `New Task Assigned: ${task.title}`;
     const html = `
       <!DOCTYPE html>
@@ -149,7 +166,7 @@ class EmailService {
               <p><span class="label">Task:</span> ${task.title}</p>
               ${task.description ? `<p><span class="label">Description:</span> ${task.description}</p>` : ''}
               ${task.project ? `<p><span class="label">Project:</span> ${task.project.name}</p>` : ''}
-              ${task.priority ? `<p><span class="label">Priority:</span> ${task.priority.toUpperCase()}</p>` : ''}
+              ${task.priority ? `<p><span class="label">Priority:</span> ${String(task.priority).toUpperCase()}</p>` : ''}
               ${task.deadline ? `<p><span class="label">Deadline:</span> ${new Date(task.deadline).toLocaleDateString()}</p>` : ''}
             </div>
             
@@ -166,8 +183,8 @@ class EmailService {
   }
 
   async sendInvoiceReminder(invoice: Invoice & { client?: { name: string; email: string } }) {
-    if (!invoice.client) {
-      console.warn("Cannot send invoice reminder: client information missing");
+    if (!invoice.client?.email) {
+      console.warn("Cannot send invoice reminder: client information missing or email missing");
       return false;
     }
 
@@ -175,7 +192,7 @@ class EmailService {
       (new Date(invoice.dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     );
 
-    const subject = daysUntilDue < 0 
+    const subject = daysUntilDue < 0
       ? `Overdue Invoice Reminder - ${invoice.invoiceNumber}`
       : `Invoice Due Soon - ${invoice.invoiceNumber}`;
 
@@ -202,10 +219,10 @@ class EmailService {
           </div>
           <div class="content">
             <p>Dear ${invoice.client.name},</p>
-            <p>${daysUntilDue < 0 
-                ? 'This is a reminder that the following invoice is overdue:' 
-                : `Your invoice is due ${daysUntilDue === 0 ? 'today' : `in ${daysUntilDue} days`}:`
-              }</p>
+            <p>${daysUntilDue < 0
+        ? 'This is a reminder that the following invoice is overdue:'
+        : `Your invoice is due ${daysUntilDue === 0 ? 'today' : `in ${daysUntilDue} days`}:`
+      }</p>
             
             <div class="invoice-details">
               <p><span class="label">Invoice Number:</span> ${invoice.invoiceNumber}</p>
@@ -229,8 +246,8 @@ class EmailService {
   }
 
   async sendLeadFollowUp(lead: Lead & { assignedUser?: User }) {
-    if (!lead.assignedUser) {
-      console.warn("Cannot send lead follow-up: assignee information missing");
+    if (!lead.assignedUser?.email) {
+      console.warn("Cannot send lead follow-up: assignee information missing or email missing");
       return false;
     }
 
@@ -261,9 +278,9 @@ class EmailService {
             
             <div class="lead-details">
               <p><span class="label">Name:</span> ${lead.name}</p>
-              <p><span class="label">Email:</span> ${lead.email}</p>
+              <p><span class="label">Email:</span> ${lead.email ?? "N/A"}</p>
               ${lead.phone ? `<p><span class="label">Phone:</span> ${lead.phone}</p>` : ''}
-              <p><span class="label">Status:</span> ${lead.status.toUpperCase()}</p>
+              <p><span class="label">Status:</span> ${lead.status?.toUpperCase?.() ?? lead.status}</p>
               ${lead.source ? `<p><span class="label">Source:</span> ${lead.source}</p>` : ''}
               ${lead.notes ? `<p><span class="label">Notes:</span> ${lead.notes}</p>` : ''}
             </div>
@@ -281,6 +298,11 @@ class EmailService {
   }
 
   async sendWelcomeEmail(user: User) {
+    if (!user?.email) {
+      console.warn("Cannot send welcome email: user email missing");
+      return false;
+    }
+
     const subject = "Welcome to MaxTech BD";
     const html = `
       <!DOCTYPE html>
@@ -329,6 +351,11 @@ class EmailService {
   }
 
   async sendLeadServiceIntroduction(lead: Lead): Promise<boolean> {
+    if (!lead?.email) {
+      console.warn("Cannot send service introduction: lead email missing");
+      return false;
+    }
+
     const subject = "Discover Our Premium Digital Services - MaxTech BD";
     const html = `
       <!DOCTYPE html>
@@ -408,6 +435,11 @@ class EmailService {
   }
 
   async sendLeadCompanyProfile(lead: Lead): Promise<boolean> {
+    if (!lead?.email) {
+      console.warn("Cannot send company profile: lead email missing");
+      return false;
+    }
+
     const subject = "About MaxTech BD - Your Trusted Technology Partner";
     const html = `
       <!DOCTYPE html>
@@ -488,6 +520,11 @@ class EmailService {
   }
 
   async sendLeadPricingBrochure(lead: Lead): Promise<boolean> {
+    if (!lead?.email) {
+      console.warn("Cannot send pricing brochure: lead email missing");
+      return false;
+    }
+
     const subject = "MaxTech BD - Service Pricing & Packages";
     const html = `
       <!DOCTYPE html>
@@ -579,6 +616,11 @@ class EmailService {
   }
 
   async sendLeadFollowUpEmail(lead: Lead): Promise<boolean> {
+    if (!lead?.email) {
+      console.warn("Cannot send follow-up email: lead email missing");
+      return false;
+    }
+
     const subject = "Following Up - How Can We Help You? - MaxTech BD";
     const html = `
       <!DOCTYPE html>
@@ -640,10 +682,10 @@ class EmailService {
 
   getTemplateSubject(templateName: string): string {
     const subjects: Record<string, string> = {
-      "service_introduction": "Discover Our Premium Digital Services - MaxTech BD",
-      "company_profile": "About MaxTech BD - Your Trusted Technology Partner",
-      "pricing_brochure": "MaxTech BD - Service Pricing & Packages",
-      "follow_up_reminder": "Following Up - How Can We Help You? - MaxTech BD",
+      service_introduction: "Discover Our Premium Digital Services - MaxTech BD",
+      company_profile: "About MaxTech BD - Your Trusted Technology Partner",
+      pricing_brochure: "MaxTech BD - Service Pricing & Packages",
+      follow_up_reminder: "Following Up - How Can We Help You? - MaxTech BD",
     };
     return subjects[templateName] || "Message from MaxTech BD";
   }
@@ -664,9 +706,69 @@ class EmailService {
     }
   }
 
+  async sendCustomEmail(lead: Lead, template: { subject: string; message: string }, sender?: User | null): Promise<boolean> {
+    if (!lead?.email) {
+      console.warn("Cannot send custom email: lead email missing");
+      return false;
+    }
+
+    let subject = template.subject;
+    let messageBody = template.message;
+
+    // Variable substitution
+    const vars: Record<string, string> = {
+      "{{lead.name}}": lead.name,
+      "{{lead.email}}": lead.email || "",
+      "{{lead.phone}}": lead.phone || "",
+      "{{user.name}}": sender?.fullName || "The Team",
+      "{{user.email}}": sender?.email || "info@maxtechbd.com"
+    };
+
+    for (const key of Object.keys(vars)) {
+      const val = vars[key];
+      // Global replace using regex
+      subject = subject.replace(new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), val);
+      messageBody = messageBody.replace(new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), val);
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #C8102E; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center; }
+          .content { background: #f9fafb; padding: 20px; }
+          .message-body { white-space: pre-wrap; margin-bottom: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1 style="font-size: 20px; margin: 0;">${subject}</h1>
+          </div>
+          <div class="content">
+            <div class="message-body">${messageBody}</div>
+            
+            ${this.getEmailFooter()}
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.sendEmail(lead.email, subject, html);
+  }
+
   isConfigured(): boolean {
     return this.transporter !== null;
   }
 }
 
-export const emailService = new EmailService();
+/** Factory helper — call this after dotenv/config is loaded */
+export async function createEmailService(): Promise<EmailService> {
+  const svc = new EmailService();
+  await svc.init();
+  return svc;
+}

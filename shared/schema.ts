@@ -28,6 +28,23 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const leadFolders = pgTable("lead_folders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  color: text("color").default("#6366f1"),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const emailTemplates = pgTable("email_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(), // Template name for selection
+  subject: text("subject").notNull(),
+  message: text("message").notNull(),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const leads = pgTable("leads", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -38,6 +55,7 @@ export const leads = pgTable("leads", {
   status: text("status").notNull().default("new"),
   source: text("source"),
   assignedTo: varchar("assigned_to").references(() => users.id),
+  folderId: varchar("folder_id").references(() => leadFolders.id),
   followUpDate: timestamp("follow_up_date"),
   lastFollowUpReminderAt: timestamp("last_follow_up_reminder_at"),
   notes: text("notes"),
@@ -488,6 +506,15 @@ export const projectCredentials = pgTable("project_credentials", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Roles and Permissions
+export const roles = pgTable("roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  permissions: jsonb("permissions").default([]), // Array of allowed route prefixes e.g., ["/api/leads", "/api/projects"]
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -500,6 +527,10 @@ export const insertLeadSchema = createInsertSchema(leads).omit({
   id: true,
   createdAt: true,
 }).extend({
+  folderId: z.preprocess(
+    (val) => val === "" || val === "null" ? null : val,
+    z.string().nullable().optional()
+  ),
   followUpDate: z.preprocess(
     (val) => val === "" ? undefined : val,
     z.union([
@@ -776,6 +807,12 @@ export const insertProjectCredentialsSchema = createInsertSchema(projectCredenti
   updatedAt: true,
 });
 
+export const insertRoleSchema = createInsertSchema(roles).omit({
+  id: true,
+  createdAt: true,
+});
+
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -798,6 +835,22 @@ export type InsertClient = z.infer<typeof insertClientSchema>;
 export type Client = typeof clients.$inferSelect;
 
 export type InsertProject = z.infer<typeof insertProjectSchema>;
+
+export const insertLeadFolderSchema = createInsertSchema(leadFolders).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertLeadFolder = z.infer<typeof insertLeadFolderSchema>;
+export type LeadFolder = typeof leadFolders.$inferSelect;
+
+export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 
 export type InsertTask = z.infer<typeof insertTaskSchema>;

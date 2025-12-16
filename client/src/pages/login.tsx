@@ -53,7 +53,7 @@ export default function Login() {
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
-      setLocation("/");
+      setLocation("/dashboard");
     } catch (error) {
       toast({
         title: "Login failed",
@@ -80,7 +80,7 @@ export default function Login() {
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAyNHYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-30"></div>
         <div className="absolute -top-24 -left-24 w-96 h-96 bg-white/10 rounded-full blur-3xl"></div>
         <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-white/10 rounded-full blur-3xl"></div>
-        
+
         <div className="relative z-10 flex flex-col justify-center px-12 xl:px-20 text-white">
           {/* Logo */}
           <div className="mb-8">
@@ -88,7 +88,7 @@ export default function Login() {
               <img src={logoImage} alt="MaxTech BD" className="h-16 object-contain" />
             </div>
           </div>
-          
+
           {/* Headline */}
           <h1 className="text-4xl xl:text-5xl font-bold mb-4 leading-tight">
             Smart Agency<br />Control Hub
@@ -96,11 +96,11 @@ export default function Login() {
           <p className="text-lg xl:text-xl text-white/80 mb-12 max-w-md">
             Streamline your agency operations with our comprehensive management platform.
           </p>
-          
+
           {/* Features Grid */}
           <div className="grid grid-cols-2 gap-6">
             {features.map((feature, index) => (
-              <div 
+              <div
                 key={index}
                 className="flex items-start gap-3 bg-white/10 backdrop-blur-sm rounded-xl p-4 hover:bg-white/15 transition-colors"
               >
@@ -160,11 +160,11 @@ export default function Login() {
                     <FormItem>
                       <FormLabel className="text-sm font-medium">Email Address</FormLabel>
                       <FormControl>
-                        <Input 
-                          placeholder="you@example.com" 
+                        <Input
+                          placeholder="you@example.com"
                           className="h-12 px-4 bg-background border-border/50 focus:border-primary transition-colors"
-                          {...field} 
-                          data-testid="input-email" 
+                          {...field}
+                          data-testid="input-email"
                         />
                       </FormControl>
                       <FormMessage />
@@ -179,12 +179,12 @@ export default function Login() {
                       <FormLabel className="text-sm font-medium">Password</FormLabel>
                       <FormControl>
                         <div className="relative">
-                          <Input 
+                          <Input
                             type={showPassword ? "text" : "password"}
-                            placeholder="Enter your password" 
+                            placeholder="Enter your password"
                             className="h-12 px-4 pr-12 bg-background border-border/50 focus:border-primary transition-colors"
-                            {...field} 
-                            data-testid="input-password" 
+                            {...field}
+                            data-testid="input-password"
                           />
                           <button
                             type="button"
@@ -202,17 +202,13 @@ export default function Login() {
                 />
 
                 <div className="flex items-center justify-between text-sm">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" className="w-4 h-4 rounded border-border text-primary focus:ring-primary" />
-                    <span className="text-muted-foreground">Remember me</span>
-                  </label>
                   <a href="#" className="text-primary hover:underline font-medium">Forgot password?</a>
                 </div>
 
-                <Button 
-                  type="submit" 
-                  className="w-full h-12 text-base font-semibold shadow-lg hover:shadow-xl transition-all" 
-                  disabled={isLoading} 
+                <Button
+                  type="submit"
+                  className="w-full h-12 text-base font-semibold shadow-lg hover:shadow-xl transition-all"
+                  disabled={isLoading}
                   data-testid="button-login"
                 >
                   {isLoading ? (

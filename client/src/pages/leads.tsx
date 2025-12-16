@@ -1,6 +1,6 @@
 // src/pages/leads.tsx
 import { useState, useRef } from "react";
-import { Plus, Mail, Phone, Calendar, Search, X, Trash, Upload, FileSpreadsheet, Download, AlertCircle, CheckCircle2, Send, History, Clock, Check, XCircle, Sparkles } from "lucide-react";
+import { Plus, Mail, Phone, Calendar, Search, X, Trash, Upload, FileSpreadsheet, Download, AlertCircle, CheckCircle2, Send, History, Clock, Check, XCircle, Sparkles, Folder, FolderOpen, ArrowLeft, MoreVertical, Copy, Move, FolderPlus, Eye, Edit, Trash2 } from "lucide-react";
 import { SmartLeadFinder } from "@/components/smart-lead-finder";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
@@ -34,15 +34,21 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-import { insertLeadSchema, type Lead, type LeadEmail, LEAD_SOURCES, LEAD_EMAIL_TEMPLATES } from "@shared/schema";
+import { insertLeadSchema, type Lead, type LeadEmail, LEAD_SOURCES, LEAD_EMAIL_TEMPLATES, type LeadFolder, insertLeadFolderSchema, type EmailTemplate } from "@shared/schema";
 import { z } from "zod";
 import { normalizeLeadData } from "@/lib/normalizeDateInputs";
 
@@ -129,13 +135,23 @@ export default function Leads() {
   const [open, setOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
 
+  // Folder state
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [editingFolder, setEditingFolder] = useState<LeadFolder | null>(null);
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [targetFolderId, setTargetFolderId] = useState<string>("");
+  const [folderName, setFolderName] = useState("");
+  const [folderColor, setFolderColor] = useState("#6366f1");
+
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
-  
+
   // Bulk selection states
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [bulkMessageOpen, setBulkMessageOpen] = useState(false);
@@ -157,6 +173,8 @@ export default function Leads() {
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [selectedLeadForEmail, setSelectedLeadForEmail] = useState<Lead | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [customSubject, setCustomSubject] = useState("");
+  const [customMessage, setCustomMessage] = useState("");
   const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   // Smart Lead Finder state
@@ -183,14 +201,32 @@ export default function Leads() {
   const { data: categories = [] } = useQuery<{ id: number; name: string; isActive: boolean }[]>({
     queryKey: ["/api/lead-categories"],
   });
-  
+
+  // Fetch custom email templates
+  const { data: customTemplates = [] } = useQuery<EmailTemplate[]>({
+    queryKey: ["/api/email-templates"],
+  });
+
   const activeCategories = categories.filter(c => c.isActive);
+
+  // Fetch folders
+  const { data: folders = [] } = useQuery<LeadFolder[]>({
+    queryKey: ["/api/lead-folders"],
+  });
+
+  const currentFolder = folders.find(f => f.id === currentFolderId);
 
   const queryParams = new URLSearchParams();
   if (searchQuery.trim()) queryParams.append("search", searchQuery);
   if (statusFilter.trim()) queryParams.append("status", statusFilter);
   if (sourceFilter.trim()) queryParams.append("source", sourceFilter);
   if (categoryFilter.trim()) queryParams.append("category", categoryFilter);
+
+  if (currentFolderId) {
+    queryParams.append("folderId", currentFolderId);
+  } else {
+    queryParams.append("folderId", "uncategorized"); // Or handle "root" view logic
+  }
 
   const queryString = queryParams.toString();
 
@@ -206,7 +242,7 @@ export default function Leads() {
       const res = await apiRequest("GET", url);
       return res as Lead[];
     },
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
   });
 
   // Create Lead
@@ -315,6 +351,65 @@ export default function Leads() {
     },
   });
 
+  // Folder Mutations
+  const createFolderMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/lead-folders", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lead-folders"] });
+      toast({ title: "Success", description: "Folder created" });
+      setFolderDialogOpen(false);
+      setFolderName("");
+    }
+  });
+
+  const updateFolderMutation = useMutation({
+    mutationFn: ({ id, data }: any) => apiRequest("PATCH", `/api/lead-folders/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lead-folders"] });
+      toast({ title: "Success", description: "Folder updated" });
+      setFolderDialogOpen(false);
+      setEditingFolder(null);
+      setFolderName("");
+    }
+  });
+
+  const deleteFolderMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/lead-folders/${id}`),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lead-folders"] });
+      toast({ title: "Success", description: "Folder deleted" });
+      if (currentFolderId === id) setCurrentFolderId(null);
+    }
+  });
+
+  // Bulk Actions: Move Leads
+  const moveLeadsMutation = useMutation({
+    mutationFn: async ({ leadIds, folderId }: { leadIds: string[], folderId: string | null }) => {
+      const promises = leadIds.map(id => apiRequest("PATCH", `/api/leads/${id}`, { folderId }));
+      await Promise.all(promises);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      toast({ title: "Success", description: "Leads moved successfully" });
+      setMoveDialogOpen(false);
+      setSelectedLeadIds(new Set());
+    }
+  });
+
+  // Bulk Actions: Copy Leads
+  const copyLeadsMutation = useMutation({
+    mutationFn: async ({ leadIds, folderId }: { leadIds: string[], folderId: string | null }) => {
+      const promises = leadIds.map(id => apiRequest("POST", `/api/leads/${id}/copy`, { folderId }));
+      await Promise.all(promises);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      toast({ title: "Success", description: "Leads copied successfully" });
+      setCopyDialogOpen(false);
+      setSelectedLeadIds(new Set());
+    }
+  });
+
   // SweetAlert2 delete confirmation
   const handleDelete = async (id: string) => {
     const result = await Swal.fire({
@@ -344,6 +439,24 @@ export default function Leads() {
     }
   };
 
+  const handleDeleteFolder = async (id: string) => {
+    const result = await Swal.fire({
+      title: "Delete Folder?",
+      text: "This will permanently delete the folder. Leads inside will be moved to Uncategorized.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Delete Folder",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#dc2626",
+      didOpen: applySwalZIndex,
+      willOpen: applySwalZIndex,
+    });
+
+    if (result.isConfirmed) {
+      deleteFolderMutation.mutate(id);
+    }
+  };
+
   const form = useForm<LeadFormData>({
     resolver: zodResolver(leadFormSchema),
     defaultValues: {
@@ -352,6 +465,7 @@ export default function Leads() {
       phone: "",
       status: "new",
       source: undefined,
+      category: undefined,
       notes: "",
       followUpDate: "",
     },
@@ -370,10 +484,11 @@ export default function Leads() {
     setEditingLead(lead);
     form.reset({
       name: lead.name,
-      email: lead.email,
-      phone: lead.phone,
+      email: lead.email || "",
+      phone: lead.phone || "",
       status: lead.status,
-      source: lead.source as any,
+      source: (lead.source as any) || undefined,
+      category: lead.category || undefined,
       notes: lead.notes || "",
       followUpDate: lead.followUpDate
         ? new Date(lead.followUpDate).toISOString().split("T")[0]
@@ -386,30 +501,45 @@ export default function Leads() {
   const openEmailDialog = (lead: Lead) => {
     setSelectedLeadForEmail(lead);
     setSelectedTemplate("");
+    setCustomSubject("");
+    setCustomMessage("");
     setEmailDialogOpen(true);
   };
 
   const handleSendEmail = async () => {
     if (!selectedLeadForEmail || !selectedTemplate) return;
-    
+
+    if (selectedTemplate === "write_custom") {
+      if (!customSubject.trim() || !customMessage.trim()) {
+        toast({ title: "Validation Error", description: "Subject and message are required", variant: "destructive" });
+        return;
+      }
+    }
+
     setIsSendingEmail(true);
     try {
-      const response = await apiRequest("POST", `/api/leads/${selectedLeadForEmail.id}/emails/send`, {
-        templateName: selectedTemplate,
-      }) as { success: boolean; message: string };
-      
+      const payload: any = { templateName: selectedTemplate };
+      if (selectedTemplate === "write_custom") {
+        payload.subject = customSubject;
+        payload.message = customMessage;
+      }
+
+      const response = await apiRequest("POST", `/api/leads/${selectedLeadForEmail.id}/emails/send`, payload) as { success: boolean; message: string };
+
       if (response.success) {
         toast({ title: "Success", description: response.message });
         refetchEmails();
         setSelectedTemplate("");
+        setCustomSubject("");
+        setCustomMessage("");
       } else {
         toast({ title: "Error", description: response.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ 
-        title: "Error", 
-        description: error?.message || "Failed to send email", 
-        variant: "destructive" 
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to send email",
+        variant: "destructive"
       });
     } finally {
       setIsSendingEmail(false);
@@ -419,22 +549,22 @@ export default function Leads() {
   const handleSendWelcomeEmails = async (lead: Lead) => {
     setIsSendingEmail(true);
     try {
-      const response = await apiRequest("POST", `/api/leads/${lead.id}/emails/send-welcome`) as { 
-        message: string; 
-        results: { templateName: string; success: boolean }[] 
+      const response = await apiRequest("POST", `/api/leads/${lead.id}/emails/send-welcome`) as {
+        message: string;
+        results: { templateName: string; success: boolean }[]
       };
-      
+
       toast({ title: "Success", description: response.message });
-      
+
       // If email dialog is open for this lead, refresh
       if (selectedLeadForEmail?.id === lead.id) {
         refetchEmails();
       }
     } catch (error: any) {
-      toast({ 
-        title: "Error", 
-        description: error?.message || "Failed to send welcome emails", 
-        variant: "destructive" 
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to send welcome emails",
+        variant: "destructive"
       });
     } finally {
       setIsSendingEmail(false);
@@ -513,7 +643,7 @@ export default function Leads() {
     const csvContent = `name,email,phone,status,source,notes,followUpDate
 John Doe,john@example.com,+1234567890,new,Facebook,Sample lead note,2025-01-15
 Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-20`;
-    
+
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -552,11 +682,88 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
           <Button variant="outline" onClick={() => setBulkUploadOpen(true)} data-testid="button-bulk-upload">
             <Upload className="w-4 h-4 mr-2" /> Bulk Upload
           </Button>
+          <Button variant="outline" onClick={() => setFolderDialogOpen(true)}>
+            <FolderPlus className="w-4 h-4 mr-2" /> New Folder
+          </Button>
           <Button onClick={handleAddNew} data-testid="button-add-lead">
             <Plus className="w-4 h-4 mr-2" /> Add Lead
           </Button>
         </div>
       </div>
+
+      {/* Breadcrumbs */}
+      {currentFolderId && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4 px-1">
+          <button
+            onClick={() => setCurrentFolderId(null)}
+            className="hover:text-primary flex items-center gap-1 font-medium transition-colors"
+          >
+            <Folder className="w-4 h-4" />
+            Leads
+          </button>
+          <span>/</span>
+          <span className="font-semibold text-foreground flex items-center gap-1">
+            <FolderOpen className="w-4 h-4" />
+            {currentFolder?.name || "Unknown Folder"}
+          </span>
+        </div>
+      )}
+
+      {/* Folder Grid - Only show at Root */}
+      {!currentFolderId && folders.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
+          {folders.map(folder => (
+            <Card
+              key={folder.id}
+              className="cursor-pointer hover:bg-accent/50 transition-all hover:shadow-sm group relative border-2 border-transparent hover:border-primary/20"
+              onClick={() => setCurrentFolderId(folder.id)}
+            >
+              <CardContent className="p-4 flex flex-col items-center justify-center text-center gap-3">
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center transition-colors"
+                  style={{ backgroundColor: `${folder.color || "#6366f1"}20`, color: folder.color || "#6366f1" }}
+                >
+                  <Folder className="w-6 h-6 fill-current" />
+                </div>
+                <span className="font-medium text-sm truncate w-full px-1" title={folder.name}>{folder.name}</span>
+
+                {/* Folder Actions */}
+                <div className="absolute top-1 right-1" onClick={(e) => e.stopPropagation()}>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <MoreVertical className="w-3 h-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => {
+                        setEditingFolder(folder);
+                        setFolderName(folder.name);
+                        setFolderColor(folder.color || "#6366f1");
+                        setFolderDialogOpen(true);
+                      }}>
+                        Edit Folder
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => {
+                          handleDeleteFolder(folder.id);
+                        }}
+                      >
+                        Delete Folder
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {/* SEARCH + FILTERS */}
       <Card>
@@ -631,7 +838,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 ))}
               </SelectContent>
             </Select>
-            
+
             {/* Category */}
             <Select
               value={categoryFilter || ALL_SENTINEL}
@@ -790,6 +997,35 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                   )}
                 />
 
+                {/* CATEGORY */}
+                <FormField
+                  control={form.control}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Category</FormLabel>
+                      <Select
+                        value={field.value || undefined}
+                        onValueChange={field.onChange}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {activeCategories.map((c) => (
+                            <SelectItem key={c.id} value={c.name}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 {/* FOLLOW-UP */}
                 <FormField
                   control={form.control}
@@ -861,13 +1097,27 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 Select All ({leads.length})
               </Button>
             </div>
-            <Button
-              onClick={() => setBulkMessageOpen(true)}
-              data-testid="button-bulk-message"
-            >
-              <Send className="w-4 h-4 mr-2" />
-              Send Bulk Message
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setMoveDialogOpen(true)}
+              >
+                <Move className="w-4 h-4 mr-2" /> Move
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setCopyDialogOpen(true)}
+              >
+                <Copy className="w-4 h-4 mr-2" /> Copy
+              </Button>
+              <Button
+                onClick={() => setBulkMessageOpen(true)}
+                data-testid="button-bulk-message"
+              >
+                <Send className="w-4 h-4 mr-2" />
+                Send Bulk Message
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -880,7 +1130,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
           {leads.map((lead) => {
             const leadId = lead.id;
             const isSelected = selectedLeadIds.has(leadId);
-            
+
             return (
               <Card
                 key={lead.id}
@@ -889,7 +1139,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 data-testid={`card-lead-${lead.id}`}
               >
                 {/* CHECKBOX */}
-                <div 
+                <div
                   className="absolute top-2 left-2 z-10"
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -907,7 +1157,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                     data-testid={`checkbox-lead-${lead.id}`}
                   />
                 </div>
-                
+
                 {/* ACTION BUTTONS */}
                 <div className="absolute top-2 right-2 flex gap-1 z-10">
                   <Button
@@ -965,7 +1215,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                     <div className="flex gap-2 items-center">
                       <Calendar className="w-4 h-4" />
                       Follow-up:{" "}
-                      {new Date(lead.followUpDate).toLocaleDateString()}
+                      {lead.followUpDate ? new Date(lead.followUpDate).toLocaleDateString() : "Not set"}
                     </div>
 
                     <p className="text-xs text-muted-foreground">
@@ -1110,7 +1360,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
           setSelectedTemplate("");
         }
       }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Send className="w-5 h-5" />
@@ -1127,18 +1377,62 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
             {/* Send Individual Template */}
             <div className="space-y-3">
               <label className="text-sm font-medium">Select Email Template</label>
-              <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+              <Select value={selectedTemplate} onValueChange={(val) => {
+                setSelectedTemplate(val);
+                // Clear custom fields when switching away
+                if (val !== "write_custom") {
+                  setCustomSubject("");
+                  setCustomMessage("");
+                } else {
+                  // Set default message with variables
+                  setCustomMessage(`Hi {{lead.name}},\n\n\n\nBest regards,\n{{user.name}}`);
+                }
+              }}>
                 <SelectTrigger data-testid="select-email-template">
                   <SelectValue placeholder="Choose a template..." />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="system_group" disabled className="font-semibold opacity-70">System Templates</SelectItem>
                   {LEAD_EMAIL_TEMPLATES.map((template) => (
                     <SelectItem key={template} value={template}>
                       {EMAIL_TEMPLATE_LABELS[template] || template}
                     </SelectItem>
                   ))}
+
+                  <div className="h-px bg-muted my-1" />
+                  <SelectItem value="write_custom" className="font-medium text-primary">
+                    <span className="flex items-center gap-2">
+                      <Edit className="w-4 h-4" />
+                      Write Custom Email
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
+
+              {selectedTemplate === "write_custom" && (
+                <div className="space-y-3 pt-2 border-t mt-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Subject</label>
+                    <Input
+                      placeholder="Email subject..."
+                      value={customSubject}
+                      onChange={(e) => setCustomSubject(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Message</label>
+                    <Textarea
+                      placeholder="Type your message here..."
+                      value={customMessage}
+                      onChange={(e) => setCustomMessage(e.target.value)}
+                      className="min-h-[200px]"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Supported variables: <code>{'{{lead.name}}'}</code>, <code>{'{{lead.email}}'}</code>, <code>{'{{user.name}}'}</code>
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <Button
                 onClick={handleSendEmail}
@@ -1190,7 +1484,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 <History className="w-4 h-4" />
                 <label className="text-sm font-medium">Email History</label>
               </div>
-              
+
               {emailHistory.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
                   No emails sent to this lead yet.
@@ -1209,8 +1503,8 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                             {EMAIL_TEMPLATE_LABELS[email.templateName] || email.templateName}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {email.sentAt 
-                              ? new Date(email.sentAt).toLocaleString() 
+                            {email.sentAt
+                              ? new Date(email.sentAt).toLocaleString()
                               : new Date(email.createdAt).toLocaleString()}
                           </p>
                         </div>
@@ -1247,7 +1541,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
           </div>
         </DialogContent>
       </Dialog>
-      
+
       {/* Bulk Message Composer Dialog */}
       <Dialog open={bulkMessageOpen} onOpenChange={(open) => {
         setBulkMessageOpen(open);
@@ -1266,7 +1560,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
               Send a promotional email to {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''}
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             {/* Recipients Preview */}
             <div>
@@ -1289,7 +1583,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 </div>
               </div>
             </div>
-            
+
             {/* Subject */}
             <div>
               <label className="text-sm font-medium">Subject</label>
@@ -1301,7 +1595,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 data-testid="input-bulk-subject"
               />
             </div>
-            
+
             {/* Message Content */}
             <div>
               <label className="text-sm font-medium">Message</label>
@@ -1316,7 +1610,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 Use {"{name}"} to personalize the message with the recipient's name.
               </p>
             </div>
-            
+
             {/* Actions */}
             <div className="flex justify-end gap-2 pt-4">
               <Button
@@ -1337,20 +1631,20 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                     });
                     return;
                   }
-                  
+
                   setIsSendingBulk(true);
                   try {
                     const selectedLeads = leads.filter(l => selectedLeadIds.has(l.id));
                     const leadIds = selectedLeads.map(l => l.id);
-                    
+
                     const response = await apiRequest("POST", "/api/leads/bulk-message", {
                       leadIds,
                       subject: bulkMessageSubject,
                       content: bulkMessageContent,
                     });
-                    
+
                     const result = response as { success: number; failed: number; errors: string[] };
-                    
+
                     if (result.success > 0) {
                       toast({
                         title: "Bulk Message Sent",
@@ -1393,6 +1687,100 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                 )}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Folder Dialog */}
+      <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingFolder ? "Edit Folder" : "New Folder"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Folder Name</label>
+              <Input value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="e.g. Software, Real Estate" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Color</label>
+              <div className="flex gap-2">
+                {["#6366f1", "#ef4444", "#22c55e", "#eab308", "#ec4899", "#8b5cf6", "#06b6d4"].map(color => (
+                  <div
+                    key={color}
+                    className={`w-6 h-6 rounded-full cursor-pointer border-2 ${folderColor === color ? "border-black" : "border-transparent"}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setFolderColor(color)}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setFolderDialogOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+              if (!folderName.trim()) return;
+              const payload = { name: folderName, color: folderColor };
+              if (editingFolder) {
+                updateFolderMutation.mutate({ id: editingFolder.id, data: payload });
+              } else {
+                createFolderMutation.mutate(payload);
+              }
+            }}>
+              {editingFolder ? "Save Changes" : "Create Folder"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move Dialog */}
+      <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Move {selectedLeadIds.size} Leads</DialogTitle></DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium mb-2 block">Select Destination Folder</label>
+            <Select value={targetFolderId} onValueChange={setTargetFolderId}>
+              <SelectTrigger><SelectValue placeholder="Choose folder..." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="uncategorized">Uncategorized (Root)</SelectItem>
+                {folders.map(f => (
+                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setMoveDialogOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+              const fid = targetFolderId === "uncategorized" || !targetFolderId ? null : targetFolderId;
+              moveLeadsMutation.mutate({ leadIds: Array.from(selectedLeadIds), folderId: fid });
+            }}>Move</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Copy Dialog */}
+      <Dialog open={copyDialogOpen} onOpenChange={setCopyDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Copy {selectedLeadIds.size} Leads</DialogTitle></DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium mb-2 block">Select Destination Folder</label>
+            <Select value={targetFolderId} onValueChange={setTargetFolderId}>
+              <SelectTrigger><SelectValue placeholder="Choose folder..." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="uncategorized">Uncategorized (Root)</SelectItem>
+                {folders.map(f => (
+                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setCopyDialogOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+              const fid = targetFolderId === "uncategorized" || !targetFolderId ? null : targetFolderId;
+              copyLeadsMutation.mutate({ leadIds: Array.from(selectedLeadIds), folderId: fid });
+            }}>Copy</Button>
           </div>
         </DialogContent>
       </Dialog>
