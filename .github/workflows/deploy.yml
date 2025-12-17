@@ -1,0 +1,64 @@
+name: Deploy SmartAgencyHub
+
+on:
+  push:
+    branches: [ main ] # Change to 'master' if that is your branch name
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Get the latest code
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. Prepare Node.js environment (Matching your Server's v24)
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22' # GitHub doesn't always have v24 immediately available, v22 is compatible.
+
+    # 3. Build the project on GitHub (Saves your server CPU)
+    - name: Install & Build
+      run: |
+        npm ci
+        npm run build
+        # This creates the 'dist' folder shown in your VS Code
+
+    # 4. Upload files to Namecheap
+    - name: Deploy to Server
+      uses: easingthemes/ssh-deploy@main
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        ARGS: "-rlgoDzvc -i --delete"
+        SOURCE: "/"
+        REMOTE_HOST: ${{ secrets.SSH_HOST }}
+        REMOTE_USER: ${{ secrets.SSH_USERNAME }}
+        REMOTE_PORT: ${{ secrets.SSH_PORT }}
+        TARGET: "/home/maxtijvr/SmartAgencyHub"
+        # EXCLUDE prevents overwriting sensitive server files
+        EXCLUDE: "/node_modules/, /.git/, /.github/, /.env, /uploads/"
+
+    # 5. Install Dependencies & Restart Server
+    - name: Post-Deploy Script
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          # Go to the folder
+          cd /home/maxtijvr/SmartAgencyHub
+          
+          # ACTIVATE THE VIRTUAL ENVIRONMENT (Crucial for cPanel Node.js)
+          source /home/maxtijvr/nodevenv/SmartAgencyHub/24/bin/activate
+          
+          # Install only production dependencies
+          npm install --production
+          
+          # Restart the App (The "touch" method is standard for cPanel)
+          mkdir -p tmp
+          touch tmp/restart.txt
+          echo "Deployment successful and server restarted."
