@@ -194,7 +194,6 @@ function AppLayout() {
           </div>
         </div>
       </SidebarProvider>
-      {/* Floating Chat Widget - Rendered outside layout to ensure fixed positioning works */}
       <ChatWidget />
     </>
   );
