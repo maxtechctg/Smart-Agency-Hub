@@ -37,6 +37,14 @@ export const leadFolders = pgTable("lead_folders", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const roles = pgTable("roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  permissions: jsonb("permissions").default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const emailTemplates = pgTable("email_templates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(), // Template name for selection
@@ -509,13 +517,7 @@ export const projectCredentials = pgTable("project_credentials", {
 });
 
 // Roles and Permissions
-export const roles = pgTable("roles", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull().unique(),
-  description: text("description"),
-  permissions: jsonb("permissions").default([]), // Array of allowed route prefixes e.g., ["/api/leads", "/api/projects"]
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+
 
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({
@@ -803,6 +805,11 @@ export const insertSalaryAdjustmentSchema = createInsertSchema(salaryAdjustments
   createdAt: true,
 });
 
+export const insertPerformanceScoreSchema = createInsertSchema(performanceScores).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
   id: true,
   createdAt: true,
@@ -814,8 +821,7 @@ export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit
     type: z.string().optional()
   })).optional().default([]),
 });
-createdAt: true,
-});
+
 
 export const insertProjectCredentialsSchema = createInsertSchema(projectCredentials).omit({
   id: true,
@@ -857,10 +863,7 @@ export const insertLeadFolderSchema = createInsertSchema(leadFolders).omit({
   createdAt: true,
 });
 
-export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
-  id: true,
-  createdAt: true,
-});
+
 
 export type InsertLeadFolder = z.infer<typeof insertLeadFolderSchema>;
 export type LeadFolder = typeof leadFolders.$inferSelect;
@@ -949,3 +952,6 @@ export type PerformanceScore = typeof performanceScores.$inferSelect;
 
 export type InsertProjectCredentials = z.infer<typeof insertProjectCredentialsSchema>;
 export type ProjectCredentials = typeof projectCredentials.$inferSelect;
+
+export type InsertRole = z.infer<typeof insertRoleSchema>;
+export type Role = typeof roles.$inferSelect;

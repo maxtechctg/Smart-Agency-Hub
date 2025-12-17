@@ -1,0 +1,29 @@
+[2025-12-17T05:31:27.467Z] [EMAIL SERVICE]
+To: maxtechctg@gmail.com
+Attachments Count: 0
+Attachments Raw: []
+
+[2025-12-17T05:36:33.994Z] [EMAIL SERVICE]
+To: maxtechctg@gmail.com
+Attachments Count: 0
+Attachments Raw: []
+
+[2025-12-17T05:44:37.440Z] [EMAIL SERVICE]
+To: maxtechctg@gmail.com
+Attachments Count: 0
+Attachments Raw: []
+
+[2025-12-17T05:58:48.139Z] [BULK EMAIL REQUEST (ACTIVE ROUTE)]
+Lead IDs: 1
+Attachments Type: object
+Attachments IsArray: true
+Attachments Raw: [{"name":"screencapture-mail-google-mail-u-0-2025-12-17-11_45_10.png","url":"/uploads/1765951123303-424255311-screencapture-mail-google-mail-u-0-2025-12-17-11_45_10.png","type":"image/png"}]
+
+[2025-12-17T05:58:50.301Z] [EMAIL SERVICE]
+To: maxtechctg@gmail.com
+Attachments Count: 1
+Attachments Raw: [{"name":"screencapture-mail-google-mail-u-0-2025-12-17-11_45_10.png","url":"/uploads/1765951123303-424255311-screencapture-mail-google-mail-u-0-2025-12-17-11_45_10.png","type":"image/png"}]
+
+[2025-12-17T05:58:50.305Z] Processing Path: C:\Users\USER\Downloads\SmartAgencyHub\SmartAgencyHub\uploads\1765951123303-424255311-screencapture-mail-google-mail-u-0-2025-12-17-11_45_10.png
+Exists: true
+

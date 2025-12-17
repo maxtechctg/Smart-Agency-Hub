@@ -4,10 +4,10 @@
  */
 
 import { db } from "../db";
-import { 
-  employees, 
-  attendance, 
-  salaryStructure, 
+import {
+  employees,
+  attendance,
+  salaryStructure,
   payroll,
   salarySlips,
   hrSettings
@@ -53,7 +53,7 @@ class PayrollService {
 
       // Get HR settings for calculations
       const [settings] = await db.select().from(hrSettings).limit(1);
-      
+
       // Use configured office settings with fallback defaults
       const fullDayHours = settings?.fullDayHours ? parseFloat(settings.fullDayHours.toString()) : 8;
       const overtimeEnabled = settings?.overtimeEnabled ?? false;
@@ -65,7 +65,7 @@ class PayrollService {
       const endDate = new Date(year, month, 0); // Last day of month
       const startDateStr = toDateOnlyString(startDate);
       const endDateStr = toDateOnlyString(endDate);
-      
+
       // Calculate actual working days in the month (excluding weekly offs)
       const weeklyOffDays = (Array.isArray(settings?.weeklyOffDays) ? settings.weeklyOffDays : ["Friday"]) as string[];
       const dayOfWeekMap: { [key: string]: number } = {
@@ -73,7 +73,7 @@ class PayrollService {
         "Thursday": 4, "Friday": 5, "Saturday": 6
       };
       const offDayNumbers = weeklyOffDays.map((day: string) => dayOfWeekMap[day]).filter((num: number | undefined) => num !== undefined) as number[];
-      
+
       // Count working days in the month
       let workingDaysInMonth = 0;
       const totalDaysInMonth = endDate.getDate();
@@ -94,7 +94,7 @@ class PayrollService {
           sql`${attendance.date} <= ${endDateStr}`
         ));
 
-      console.log(`🔍 PAYROLL DEBUG - Employee: ${employee.fullName}`);
+      console.log(`🔍 PAYROLL DEBUG - Employee: ${employee.employeeId}`);
       console.log(`🔍 Date Range: ${startDateStr} to ${endDateStr}`);
       console.log(`🔍 Total attendance records fetched: ${attendanceRecords.length}`);
       console.log(`🔍 Attendance records:`, attendanceRecords.map(r => ({ date: r.date, status: r.status })));
@@ -109,14 +109,14 @@ class PayrollService {
 
       // Calculate overtime hours from actual check-in/check-out times (only if enabled)
       let totalOvertimeHours = 0;
-      
+
       if (overtimeEnabled) {
         for (const record of attendanceRecords) {
           if (record.checkIn && record.checkOut) {
             const checkInTime = new Date(record.checkIn);
             const checkOutTime = new Date(record.checkOut);
             const hoursWorked = (checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
-            
+
             if (hoursWorked > fullDayHours) {
               totalOvertimeHours += (hoursWorked - fullDayHours);
             }
@@ -137,19 +137,19 @@ class PayrollService {
       const effectiveWorkingDays = workingDaysInMonth > 0 ? workingDaysInMonth : 26; // Fallback to 26 if calculation fails
       const dailyRate = basicSalary / effectiveWorkingDays;
       const hourlyRate = dailyRate / fullDayHours; // Hourly rate based on configured full-day hours
-      
+
       // Late deduction: Using configured late deduction rule and actual working days
       const lateDeduction = this.calculateLateDeduction(lateDays, basicSalary, lateDeductionRule, effectiveWorkingDays);
-      
+
       console.log(`🔍 LATE CALCULATION - Late Days: ${lateDays}, Basic: ${basicSalary}, Rule: ${lateDeductionRule}, Working Days: ${effectiveWorkingDays}`);
       console.log(`🔍 LATE DEDUCTION CALCULATED: ${lateDeduction}`);
-      
+
       // Half-day deduction: 0.5 × Daily Rate
       const halfDayDeduction = halfDays * (dailyRate * 0.5);
-      
+
       // Absent deduction: Daily Rate × Absent Days
       const absentDeduction = absentDays * dailyRate;
-      
+
       // Loan and advance deductions (set to 0 during initial generation - can be added via manual adjustments later)
       const loanDeduction = 0;
       const advanceDeduction = 0;

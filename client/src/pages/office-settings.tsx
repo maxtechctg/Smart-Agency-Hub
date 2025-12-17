@@ -67,20 +67,20 @@ export default function OfficeSettings() {
     resolver: zodResolver(officeSettingsSchema),
     values: settings
       ? {
-          officeStartTime: settings.officeStartTime || "09:00",
-          officeEndTime: settings.officeEndTime || "18:00",
-          fullDayHours: Number(settings.fullDayHours) || 8,
-          gracePeriodMinutes: Number(settings.gracePeriodMinutes) || 10,
-          halfDayCutoffTime: settings.halfDayCutoffTime || "14:00",
-          halfDayHours: Number(settings.halfDayHours) || 4,
-          minimumHoursForPresent: Number(settings.minimumHoursForPresent) || 6,
-          overtimeEnabled: settings.overtimeEnabled || false,
-          overtimeRateMultiplier: Number(settings.overtimeRateMultiplier) || 1.5,
-          lateDeductionRule: Number(settings.lateDeductionRule) || 3,
-          weeklyOffDays: Array.isArray(settings.weeklyOffDays)
-            ? settings.weeklyOffDays
-            : ["Friday"],
-        }
+        officeStartTime: settings.officeStartTime || "09:00",
+        officeEndTime: settings.officeEndTime || "18:00",
+        fullDayHours: Number(settings.fullDayHours) || 8,
+        gracePeriodMinutes: Number(settings.gracePeriodMinutes) || 10,
+        halfDayCutoffTime: settings.halfDayCutoffTime || "14:00",
+        halfDayHours: Number(settings.halfDayHours) || 4,
+        minimumHoursForPresent: Number(settings.minimumHoursForPresent) || 6,
+        overtimeEnabled: settings.overtimeEnabled || false,
+        overtimeRateMultiplier: Number(settings.overtimeRateMultiplier) || 1.5,
+        lateDeductionRule: Number(settings.lateDeductionRule) || 3,
+        weeklyOffDays: Array.isArray(settings.weeklyOffDays)
+          ? settings.weeklyOffDays
+          : ["Friday"],
+      }
       : undefined,
   });
 
@@ -425,12 +425,12 @@ export default function OfficeSettings() {
                                     checked={field.value?.includes(day)}
                                     onCheckedChange={(checked) => {
                                       return checked
-                                        ? field.onChange([...field.value, day])
+                                        ? field.onChange([...(field.value || []), day])
                                         : field.onChange(
-                                            field.value?.filter(
-                                              (value) => value !== day
-                                            )
-                                          );
+                                          field.value?.filter(
+                                            (value) => value !== day
+                                          )
+                                        );
                                     }}
                                     data-testid={`checkbox-day-${day.toLowerCase()}`}
                                   />

@@ -1,6 +1,6 @@
-// src/services/emailService.ts
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
+import fs from "fs";
 import type { Task, Invoice, Lead, User } from "@shared/schema";
 import path from "path";
 
@@ -113,15 +113,35 @@ export class EmailService {
     }
 
     try {
+      try {
+        const logEntry = `[${new Date().toISOString()}] [EMAIL SERVICE]\n` +
+          `To: ${to}\n` +
+          `Attachments Count: ${attachments?.length}\n` +
+          `Attachments Raw: ${JSON.stringify(attachments)}\n\n`;
+        fs.appendFileSync(path.join(process.cwd(), "debug_logs.txt"), logEntry);
+      } catch (logErr) { console.error("Failed to write log", logErr); }
+
+      console.log("[EMAIL SERVICE] sendEmail called for:", to);
+      console.log("[EMAIL SERVICE] Attachments count:", attachments?.length);
+
       // Process attachments to point to local file system
       const processedAttachments = attachments.map(att => {
         // If url starts with /uploads, modify to point to local path
         if (att.url && att.url.startsWith('/uploads/')) {
+          const localPath = path.join(process.cwd(), att.url);
+
+          try {
+            fs.appendFileSync(path.join(process.cwd(), "debug_logs.txt"),
+              `[${new Date().toISOString()}] Processing Path: ${localPath}\nExists: ${fs.existsSync(localPath)}\n\n`);
+          } catch (e) { }
+
+          console.log(`[EMAIL SERVICE] Processing attachment: ${att.name}, URL: ${att.url} -> Path: ${localPath}`);
           return {
             filename: att.name,
-            path: path.join(process.cwd(), att.url)
+            path: localPath
           };
         }
+        console.log(`[EMAIL SERVICE] Processing attachment (raw URL): ${att.name}, URL: ${att.url}`);
         return {
           filename: att.name,
           path: att.url // Assuming absolute path if not /uploads

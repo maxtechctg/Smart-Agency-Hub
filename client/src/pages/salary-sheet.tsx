@@ -67,6 +67,7 @@ type Payroll = {
   totalLateDays: number;
   totalAbsentDays: number;
   totalPresentDays: number;
+  totalHalfDays: number;
   totalOvertimeHours: string;
   workingDays: number;
   status: string;
@@ -121,14 +122,14 @@ export default function SalarySheet() {
           "Authorization": `Bearer ${token}`
         }
       });
-      
+
       if (!response.ok) {
         if (response.status === 403) {
           throw new Error("Access denied");
         }
         throw new Error("Failed to fetch salary sheet");
       }
-      
+
       return response.json();
     }
   });
@@ -144,11 +145,11 @@ export default function SalarySheet() {
           "Authorization": `Bearer ${token}`
         }
       });
-      
+
       if (!response.ok) {
         throw new Error("Failed to fetch adjustments");
       }
-      
+
       return response.json();
     }
   });
@@ -255,14 +256,14 @@ export default function SalarySheet() {
           "Authorization": `Bearer ${token}`
         }
       });
-      
+
       if (!response.ok) {
         if (response.status === 403) {
           throw new Error("Access denied - insufficient permissions");
         }
         throw new Error("Failed to generate PDF");
       }
-      
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -272,7 +273,7 @@ export default function SalarySheet() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       toast({
         title: "PDF Downloaded",
         description: "Salary Sheet exported successfully",
@@ -295,14 +296,14 @@ export default function SalarySheet() {
           "Authorization": `Bearer ${token}`
         }
       });
-      
+
       if (!response.ok) {
         if (response.status === 403) {
           throw new Error("Access denied - insufficient permissions");
         }
         throw new Error("Failed to generate Excel");
       }
-      
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -312,7 +313,7 @@ export default function SalarySheet() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       toast({
         title: "Excel Downloaded",
         description: "Salary Sheet exported successfully",
@@ -335,14 +336,14 @@ export default function SalarySheet() {
           "Authorization": `Bearer ${token}`
         }
       });
-      
+
       if (!response.ok) {
         if (response.status === 403) {
           throw new Error("Access denied - insufficient permissions");
         }
         throw new Error("Failed to generate Word document");
       }
-      
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -352,7 +353,7 @@ export default function SalarySheet() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       toast({
         title: "Word Document Downloaded",
         description: "Salary Sheet exported successfully",
@@ -368,7 +369,7 @@ export default function SalarySheet() {
 
   const handleAddAdjustment = () => {
     if (!selectedPayroll) return;
-    
+
     // Validate amount
     const amountValue = parseFloat(adjustmentForm.amount);
     if (!adjustmentForm.amount || isNaN(amountValue) || amountValue <= 0) {
@@ -390,9 +391,9 @@ export default function SalarySheet() {
     }
 
     // Determine if amount should be negative (penalties and deductions subtract from salary)
-    const isDeduction = adjustmentForm.type === "penalty" || 
-                        adjustmentForm.type === "loan_deduction" || 
-                        adjustmentForm.type === "advance";
+    const isDeduction = adjustmentForm.type === "penalty" ||
+      adjustmentForm.type === "loan_deduction" ||
+      adjustmentForm.type === "advance";
     const finalAmount = isDeduction ? -Math.abs(amountValue) : Math.abs(amountValue);
 
     addAdjustmentMutation.mutate({
@@ -436,12 +437,12 @@ export default function SalarySheet() {
 
   // Calculate totals with null-safe handling
   const totalEmployees = salaryRecords?.length || 0;
-  
-  const totalBasic = sumAmounts((salaryRecords || []).map(r => 
+
+  const totalBasic = sumAmounts((salaryRecords || []).map(r =>
     r.payroll?.basicSalary || r.salaryStructure?.basicSalary || "0"
   ));
-  
-  const totalAllowances = sumAmounts((salaryRecords || []).map(r => 
+
+  const totalAllowances = sumAmounts((salaryRecords || []).map(r =>
     r.payroll?.totalAllowances || sumAmounts([
       r.salaryStructure?.houseAllowance || "0",
       r.salaryStructure?.foodAllowance || "0",
@@ -450,7 +451,7 @@ export default function SalarySheet() {
       r.salaryStructure?.otherAllowances || "0"
     ])
   ));
-  
+
   const totalDeductions = sumAmounts(
     (salaryRecords || []).flatMap(r => [
       r.payroll?.loanDeduction || "0",
@@ -458,9 +459,9 @@ export default function SalarySheet() {
       r.payroll?.otherDeductions || "0"
     ])
   );
-  
+
   const totalOvertime = sumAmounts((salaryRecords || []).map(r => r.payroll?.overtimeAmount || "0"));
-  
+
   const totalNetSalary = sumAmounts((salaryRecords || []).map(r => {
     if (r.payroll?.netSalary) {
       return r.payroll.netSalary;
@@ -475,7 +476,7 @@ export default function SalarySheet() {
     ]);
     return sumAmounts([basic, allowances]);
   }));
-  
+
   const totalPaidCount = (salaryRecords || []).filter(r => r.payroll?.status === "paid").length;
   const hasGeneratedSalary = (salaryRecords || []).some(r => r.payroll !== null);
 
@@ -602,7 +603,7 @@ export default function SalarySheet() {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel data-testid="button-cancel-regenerate">Cancel</AlertDialogCancel>
-                    <AlertDialogAction 
+                    <AlertDialogAction
                       onClick={() => generateSalaryMutation.mutate()}
                       disabled={generateSalaryMutation.isPending}
                       data-testid="button-confirm-regenerate"
@@ -613,7 +614,7 @@ export default function SalarySheet() {
                 </AlertDialogContent>
               </AlertDialog>
             ) : (
-              <Button 
+              <Button
                 onClick={() => generateSalaryMutation.mutate()}
                 disabled={generateSalaryMutation.isPending}
                 data-testid="button-generate-salary"
@@ -834,7 +835,7 @@ export default function SalarySheet() {
                             >
                               <Plus className="w-3 h-3" />
                             </Button>
-                            
+
                             {/* View Adjustments */}
                             <Button
                               size="sm"
@@ -883,12 +884,12 @@ export default function SalarySheet() {
               Add a manual adjustment to the salary (bonus, penalty, loan deduction, etc.)
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="adjustment-type">Adjustment Type</Label>
-              <Select 
-                value={adjustmentForm.type} 
+              <Select
+                value={adjustmentForm.type}
                 onValueChange={(value) => setAdjustmentForm({ ...adjustmentForm, type: value })}
               >
                 <SelectTrigger id="adjustment-type" data-testid="select-adjustment-type">
@@ -917,7 +918,7 @@ export default function SalarySheet() {
                 data-testid="input-adjustment-amount"
               />
               <p className="text-xs text-muted-foreground">
-                {adjustmentForm.type === "bonus" || adjustmentForm.type === "other" 
+                {adjustmentForm.type === "bonus" || adjustmentForm.type === "other"
                   ? "Enter positive amount (will be added to salary)"
                   : "Enter positive amount (will be deducted from salary automatically)"}
               </p>
@@ -936,8 +937,8 @@ export default function SalarySheet() {
           </div>
 
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setAdjustmentDialogOpen(false);
                 setAdjustmentForm({ type: "bonus", amount: "", reason: "" });
@@ -946,7 +947,7 @@ export default function SalarySheet() {
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={handleAddAdjustment}
               disabled={addAdjustmentMutation.isPending}
               data-testid="button-save-adjustment"
@@ -966,7 +967,7 @@ export default function SalarySheet() {
               All manual adjustments applied to this salary record
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="py-4">
             {!adjustments || adjustments.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
@@ -975,8 +976,8 @@ export default function SalarySheet() {
             ) : (
               <div className="space-y-2">
                 {adjustments.map((adj, index) => (
-                  <div 
-                    key={adj.id} 
+                  <div
+                    key={adj.id}
                     className="flex items-center justify-between p-4 border rounded-md"
                     data-testid={`adjustment-item-${index}`}
                   >
@@ -1019,8 +1020,8 @@ export default function SalarySheet() {
           </div>
 
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setViewAdjustmentsDialogOpen(false)}
               data-testid="button-close-adjustments"
             >
@@ -1039,14 +1040,14 @@ export default function SalarySheet() {
               Change the payment status for this salary record
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-3 py-4">
             <p className="text-sm text-muted-foreground">
               Current Status: <Badge variant={getStatusBadgeVariant(selectedPayroll?.status || "draft")}>
                 {selectedPayroll?.status || "draft"}
               </Badge>
             </p>
-            
+
             <div className="flex gap-2 flex-wrap">
               <Button
                 variant={selectedPayroll?.status === "draft" ? "default" : "outline"}
@@ -1079,8 +1080,8 @@ export default function SalarySheet() {
           </div>
 
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setStatusDialogOpen(false)}
               data-testid="button-close-status"
             >

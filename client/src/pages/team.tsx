@@ -12,7 +12,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { UserPlus, Edit, Trash2, Users, Mail, Shield, Search, Plus, Ban, CheckCircle } from "lucide-react";
+import { UserPlus, Edit, Trash2, Users, Mail, Shield, Search, Plus, Ban, CheckCircle, Settings } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -143,6 +143,57 @@ export default function Team() {
     }
   });
 
+  const [manageRolesOpen, setManageRolesOpen] = useState(false);
+  const [editRoleOpen, setEditRoleOpen] = useState(false);
+  const [editingRole, setEditingRole] = useState<RoleConfig | null>(null);
+
+  const updateRoleMutation = useMutation({
+    mutationFn: async (data: { id: string; name: string; description: string; permissions: string[] }) => {
+      return apiRequest("PATCH", `/api/roles/${data.id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/roles"] });
+      setEditRoleOpen(false);
+      setEditingRole(null);
+      toast({ title: "Success", description: "Role updated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  });
+
+  const deleteRoleMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/roles/${id}`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/roles"] });
+      toast({ title: "Success", description: "Role deleted successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  });
+
+  const handleEditRole = () => {
+    if (!editingRole || !newRoleName) return;
+    updateRoleMutation.mutate({
+      id: editingRole.id,
+      name: newRoleName,
+      description: newRoleDesc,
+      permissions: selectedPermissions
+    });
+  };
+
+  const openEditRole = (role: RoleConfig) => {
+    setEditingRole(role);
+    setNewRoleName(role.name);
+    setNewRoleDesc(role.description);
+    setSelectedPermissions(role.permissions || []);
+    setEditRoleOpen(true);
+  };
+
+
   const handleCreateRole = () => {
     if (!newRoleName) {
       toast({ title: "Error", description: "Role name is required", variant: "destructive" });
@@ -259,6 +310,10 @@ export default function Team() {
             <p className="text-muted-foreground">Manage your team members and their roles</p>
           </div>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+            <Button variant="outline" onClick={() => setManageRolesOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" />
+              Manage Roles
+            </Button>
             <DialogTrigger asChild>
               <Button data-testid="button-create-user">
                 <UserPlus className="w-4 h-4 mr-2" />
@@ -425,6 +480,119 @@ export default function Team() {
                 <Button variant="outline" onClick={() => setCreateRoleOpen(false)}>Cancel</Button>
                 <Button onClick={handleCreateRole} disabled={createRoleMutation.isPending}>
                   {createRoleMutation.isPending ? "Creating..." : "Create Role"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+
+        {/* Manage Roles Dialog */}
+        <Dialog open={manageRolesOpen} onOpenChange={setManageRolesOpen}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Manage Roles</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <p className="text-sm text-muted-foreground">Custom roles allow you to define specific access permissions for your team.</p>
+                <Button size="sm" onClick={() => {
+                  setNewRoleName("");
+                  setNewRoleDesc("");
+                  setSelectedPermissions([]);
+                  setCreateRoleOpen(true);
+                }}>
+                  <Plus className="w-4 h-4 mr-2" /> Create New Role
+                </Button>
+              </div>
+
+              <div className="grid gap-4">
+                {dynamicRoles?.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground border rounded-md">
+                    No custom roles found. Create one to get started.
+                  </div>
+                ) : (
+                  dynamicRoles?.map(role => (
+                    <div key={role.id} className="flex items-center justify-between p-4 border rounded-md hover:bg-muted/50">
+                      <div>
+                        <div className="font-medium flex items-center gap-2">
+                          {role.name}
+                          <Badge variant="secondary" className="text-xs font-normal bg-purple-100 text-purple-700">Custom Role</Badge>
+                        </div>
+                        <div className="text-sm text-muted-foreground">{role.description}</div>
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {role.permissions?.map((p, i) => (
+                            <Badge key={i} variant="outline" className="text-[10px]">
+                              {resources?.find(r => r.id === p)?.name || p}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="ghost" onClick={() => openEditRole(role)}>
+                          <Edit className="w-4 h-4 text-blue-500" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete role "${role.name}"?`)) {
+                              deleteRoleMutation.mutate(role.id);
+                            }
+                          }}
+                          disabled={deleteRoleMutation.isPending}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Role Dialog */}
+        <Dialog open={editRoleOpen} onOpenChange={setEditRoleOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Role: {editingRole?.name}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Role Name</Label>
+                <Input placeholder="e.g. Project Manager" value={newRoleName} onChange={e => setNewRoleName(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea placeholder="Describe the role..." value={newRoleDesc} onChange={e => setNewRoleDesc(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Permissions (Allowed Routes)</Label>
+                <div className="grid grid-cols-2 gap-2 border p-3 rounded-md">
+                  {resources?.map(resource => (
+                    <div key={resource.id} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`edit-${resource.id}`}
+                        checked={selectedPermissions.includes(resource.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedPermissions([...selectedPermissions, resource.id]);
+                          } else {
+                            setSelectedPermissions(selectedPermissions.filter(p => p !== resource.id));
+                          }
+                        }}
+                      />
+                      <Label htmlFor={`edit-${resource.id}`} className="text-sm cursor-pointer">{resource.name}</Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditRoleOpen(false)}>Cancel</Button>
+                <Button onClick={handleEditRole} disabled={updateRoleMutation.isPending}>
+                  {updateRoleMutation.isPending ? "Saving..." : "Save Changes"}
                 </Button>
               </div>
             </div>

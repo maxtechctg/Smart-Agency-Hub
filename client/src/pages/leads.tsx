@@ -3,6 +3,7 @@ import { useState, useRef } from "react";
 import { Plus, Mail, Phone, Calendar, Search, X, Trash, Upload, FileSpreadsheet, Download, AlertCircle, CheckCircle2, Send, History, Clock, Check, XCircle, Sparkles, Folder, FolderOpen, ArrowLeft, MoreVertical, Copy, Move, FolderPlus, Eye, Edit, Trash2 } from "lucide-react";
 import { SmartLeadFinder } from "@/components/smart-lead-finder";
 import { FileUpload } from "@/components/ui/file-upload";
+import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
 
 import { Button } from "@/components/ui/button";
@@ -1436,6 +1437,14 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                       Supported variables: <code>{'{{lead.name}}'}</code>, <code>{'{{lead.email}}'}</code>, <code>{'{{user.name}}'}</code>
                     </p>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Attachments</label>
+                    <FileUpload
+                      value={customAttachments}
+                      onChange={setCustomAttachments}
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.mp4"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -1617,6 +1626,16 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
               </p>
             </div>
 
+            {/* Attachments */}
+            <div>
+              <label className="text-sm font-medium">Attachments</label>
+              <FileUpload
+                value={bulkMessageAttachments}
+                onChange={setBulkMessageAttachments}
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.mp4"
+              />
+            </div>
+
             {/* Actions */}
             <div className="flex justify-end gap-2 pt-4">
               <Button
@@ -1639,6 +1658,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                   }
 
                   setIsSendingBulk(true);
+
                   try {
                     const selectedLeads = leads.filter(l => selectedLeadIds.has(l.id));
                     const leadIds = selectedLeads.map(l => l.id);
@@ -1647,6 +1667,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                       leadIds,
                       subject: bulkMessageSubject,
                       content: bulkMessageContent,
+                      attachments: bulkMessageAttachments,
                     });
 
                     const result = response as { success: number; failed: number; errors: string[] };
@@ -1660,6 +1681,7 @@ Jane Smith,jane@example.com,+0987654321,contacted,LinkedIn,Another lead,2025-02-
                       setSelectedLeadIds(new Set());
                       setBulkMessageSubject("");
                       setBulkMessageContent("");
+                      setBulkMessageAttachments([]);
                     } else {
                       toast({
                         title: "Send Failed",

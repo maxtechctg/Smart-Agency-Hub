@@ -56,22 +56,16 @@ import {
   insertPaymentSchema,
   insertNotificationSchema,
   insertProjectCredentialsSchema,
+  emailTemplates,
+  insertEmailTemplateSchema,
+  roles,
+  insertLeadFolderSchema,
   LEAD_EMAIL_TEMPLATES,
   DEFAULT_LEAD_CATEGORIES,
   HOSTING_PLATFORMS,
   leadFolders,
 
-export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
-    id: true,
-    createdAt: true,
-    createdBy: true,
-  }).extend({
-    attachments: z.array(z.object({
-      name: z.string(),
-      url: z.string(),
-      type: z.string().optional()
-    })).optional().default([]),
-  });
+
 } from "@shared/schema";
 import { authenticateToken, generateToken, type AuthRequest } from "./middleware/auth";
 import { auditLog, auditMiddleware } from "./middleware/audit";
@@ -79,19 +73,18 @@ import { serpApiService } from "./services/serpapi";
 import { wsService } from "./websocket";
 import { notificationService } from "./services/notification";
 import multer from "multer";
-import fs from "fs/promises";
+import fsPromises from "fs/promises";
+import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
 import { formatCurrency, calculateLineTotal, sumAmounts } from "@shared/currency";
 
 // Configure storage for file uploads
 const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
+  destination: (req, file, cb) => {
     const uploadDir = path.join(process.cwd(), "uploads");
-    try {
-      await fs.access(uploadDir);
-    } catch {
-      await fs.mkdir(uploadDir, { recursive: true });
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
     }
     cb(null, uploadDir);
   },
@@ -117,11 +110,7 @@ import { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, Al
 import Decimal from "decimal.js-light";
 import { format } from "date-fns";
 import { EmailService } from "./services/email";
-import {
-  roles,
-  insertLeadFolderSchema,
-  insertEmailTemplateSchema,
-} from "@shared/schema";
+
 
 export const RESOURCES = [
   { id: 'leads', name: 'Leads', paths: ['/api/leads', '/api/lead-folders', '/api/lead-categories'] },
@@ -129,7 +118,10 @@ export const RESOURCES = [
   { id: 'projects', name: 'Projects & Tasks', paths: ['/api/projects', '/api/tasks', '/api/files', '/api/dashboard'] },
   { id: 'finance', name: 'Finance', paths: ['/api/income', '/api/expenses', '/api/invoices', '/api/payments'] },
   { id: 'hr', name: 'HR & Payroll', paths: ['/api/employees', '/api/attendance', '/api/departments', '/api/designations', '/api/payroll', '/api/leave', '/api/salary', '/api/performance'] },
+  { id: 'communication', name: 'Communication', paths: ['/api/messages', '/api/files', '/api/chat'] },
+  { id: 'project-credentials', name: 'Project Credentials', paths: ['/api/project-credentials'] },
   { id: 'templates', name: 'Email Templates', paths: ['/api/email-templates'] },
+  { id: 'settings', name: 'Settings', paths: ['/api/office-settings', '/api/audit-logs'] },
   { id: 'users', name: 'User Management', paths: ['/api/users', '/api/roles'] },
 ];
 
@@ -180,10 +172,32 @@ async function checkPermission(userRole: string, path: string): Promise<boolean>
   return permissions.includes(resource.id);
 }
 
-const upload = multer({ dest: "uploads/" });
+
 
 export async function registerRoutes(app: Express, emailService: any): Promise<Server> {
   app.use(express.json());
+
+  // File Upload Route
+  app.post("/api/uploads", (req, res, next) => {
+    console.log("[UPLOAD] Received upload request");
+    next();
+  }, upload.single("file"), (req, res) => {
+    console.log("[UPLOAD] File processed:", req.file);
+    if (!req.file) {
+      console.error("[UPLOAD] No file in request");
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    const fileUrl = `/uploads/${req.file.filename}`;
+
+    console.log("[UPLOAD] Success, URL:", fileUrl);
+    res.json({
+      url: fileUrl,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size
+    });
+  });
 
   // Auth routes - NO PUBLIC REGISTRATION
   // All user accounts (including clients) must be created by admin via Team page
@@ -809,6 +823,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       const templates = await db.select().from(emailTemplates).orderBy(desc(emailTemplates.createdAt));
       res.json(templates);
     } catch (error: any) {
+      console.error("[EMAIL TEMPLATES ERROR]", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1349,11 +1364,44 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
   });
 
   // Lead Categories
+  // Lead Categories
   app.get("/api/lead-categories", authenticateToken, async (req: AuthRequest, res) => {
     try {
       // Only admin and operational_head can access lead categories
       if (!await checkPermission(req.userRole!, req.path)) {
         return res.status(403).json({ error: "Access denied" });
+      }
+
+      // SYNC: Ensure categories used in leads table exist in lead_categories
+      try {
+        const definedCategories = await db.select().from(leadCategories);
+        const definedNames = new Set(definedCategories.map(c => c.name.toLowerCase()));
+
+        // Get used categories from leads
+        const usedCategories = await db.selectDistinct({ name: leads.category })
+          .from(leads)
+          .where(isNotNull(leads.category));
+
+        const newCategories = usedCategories
+          .map(c => c.name)
+          .filter(name => name && !definedNames.has(name.toLowerCase()));
+
+        // Insert missing ones
+        if (newCategories.length > 0) {
+          // Unique-ify
+          const uniqueNew = [...new Set(newCategories)];
+          for (const name of uniqueNew) {
+            if (name) {
+              await db.insert(leadCategories).values({
+                name: name,
+                color: "#6366f1"
+              }).onConflictDoNothing();
+            }
+          }
+        }
+      } catch (syncError) {
+        console.error("Error syncing lead categories:", syncError);
+        // Continue to return existing categories even if sync fails
       }
 
       const categories = await db.select().from(leadCategories).orderBy(asc(leadCategories.name));
@@ -1715,7 +1763,18 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const { leadIds, subject, content } = req.body;
+      const { leadIds, subject, content, attachments } = req.body;
+
+      try {
+        const logEntry = `[${new Date().toISOString()}] [BULK EMAIL REQUEST (ACTIVE ROUTE)]\n` +
+          `Lead IDs: ${leadIds?.length}\n` +
+          `Attachments Type: ${typeof attachments}\n` +
+          `Attachments IsArray: ${Array.isArray(attachments)}\n` +
+          `Attachments Raw: ${JSON.stringify(attachments)}\n\n`;
+        fs.appendFileSync(path.join(process.cwd(), "debug_logs.txt"), logEntry);
+      } catch (logErr) {
+        console.error("Failed to write debug log", logErr);
+      }
 
       if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
         return res.status(400).json({ error: "No leads selected" });
@@ -1766,7 +1825,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
             .returning();
 
           // Send email
-          const customTemplate = { subject, message: content };
+          const customTemplate = { subject, message: content, attachments: attachments || [] };
           const sent = await emailService.sendCustomEmail(lead, customTemplate, sender);
 
           if (sent) {
@@ -1976,102 +2035,6 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
         message: `Sent ${successCount}/${templatesToSend.length} welcome emails`,
         results,
       });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-
-
-  // Bulk send custom message
-  app.post("/api/leads/bulk-message", authenticateToken, async (req: AuthRequest, res) => {
-    try {
-      // Only admin and operational_head can send bulk emails
-      if (!await checkPermission(req.userRole!, req.path)) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-
-      const { leadIds, subject, content } = req.body;
-
-      if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
-        return res.status(400).json({ error: "No leads selected" });
-      }
-
-      if (!subject || !content) {
-        return res.status(400).json({ error: "Subject and content are required" });
-      }
-
-      // Get sender info
-      const [sender] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
-
-      let successCount = 0;
-      let failedCount = 0;
-      const errors: string[] = [];
-
-      // Process each lead
-      for (const leadId of leadIds) {
-        try {
-          const [lead] = await db
-            .select()
-            .from(leads)
-            .where(eq(leads.id, leadId))
-            .limit(1);
-
-          if (!lead) {
-            failedCount++;
-            errors.push(`Lead ${leadId} not found`);
-            continue;
-          }
-
-          if (!lead.email) {
-            failedCount++;
-            errors.push(`Lead ${lead.name} has no email`);
-            continue;
-          }
-
-          // Create email record
-          const [emailRecord] = await db
-            .insert(leadEmails)
-            .values({
-              leadId: lead.id,
-              templateName: "custom_bulk",
-              subject,
-              status: "pending",
-              sentBy: req.userId!,
-            })
-            .returning();
-
-          // Send email
-          const customTemplate = { subject, message: content };
-          const sent = await emailService.sendCustomEmail(lead, customTemplate, sender);
-
-          if (sent) {
-            successCount++;
-            await db
-              .update(leadEmails)
-              .set({ status: "sent", sentAt: new Date() })
-              .where(eq(leadEmails.id, emailRecord.id));
-          } else {
-            failedCount++;
-            errors.push(`Failed to send email to ${lead.email}`);
-            await db
-              .update(leadEmails)
-              .set({ status: "failed", errorMessage: "Email service failed to send" })
-              .where(eq(leadEmails.id, emailRecord.id));
-          }
-
-        } catch (err: any) {
-          failedCount++;
-          errors.push(`Error processing lead ${leadId}: ${err.message}`);
-        }
-      }
-
-      res.json({
-        success: successCount,
-        failed: failedCount,
-        errors
-      });
-
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -2409,7 +2372,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       const [existing] = await db.select().from(attendance)
         .where(and(
           eq(attendance.userId, userId),
-          sql`${attendance.date} = ${date}`
+          sql`${attendance.date} = ${date} `
         ))
         .limit(1);
 
@@ -2707,7 +2670,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
 
       // Set response headers
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="Invoice-${invoice.invoiceNumber}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename = "Invoice-${invoice.invoiceNumber}.pdf"`);
 
       // Pipe the PDF to the response
       doc.pipe(res);
@@ -3023,15 +2986,15 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
 
       res.setHeader("Content-Type", "application/pdf");
-      const categoryLabel = category !== "all" ? `-${category}` : "";
-      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month - 1]}-${year}${categoryLabel}.pdf"`);
+      const categoryLabel = category !== "all" ? `- ${category} ` : "";
+      res.setHeader("Content-Disposition", `attachment; filename = "P&L-${months[month - 1]}-${year}${categoryLabel}.pdf"`);
 
       doc.pipe(res);
 
       // Add branded header
       const subtitle = category !== "all"
-        ? `${months[month - 1]} ${year} - Category: ${category}`
-        : `${months[month - 1]} ${year}`;
+        ? `${months[month - 1]} ${year} - Category: ${category} `
+        : `${months[month - 1]} ${year} `;
 
       let currentY = addReportHeader({
         doc,
@@ -3121,7 +3084,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       ]);
 
       currentY = createTableRow(doc, currentY, [
-        { text: `Employee Salaries (${periodPayrolls.length} payments)`, width: 350, align: "left" },
+        { text: `Employee Salaries(${periodPayrolls.length} payments)`, width: 350, align: "left" },
         { text: formatCurrency(totalPayroll), width: 165, align: "right" }
       ], true);
 
@@ -3136,8 +3099,8 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       currentY = addSummarySection(doc, currentY, [
         { label: "Total Revenue", value: formatCurrency(totalIncome) },
         { label: "Total Costs", value: formatCurrency(totalCosts) },
-        { label: "Net Profit/Loss", value: `${grossProfit >= 0 ? '' : '-'}${formatCurrency(Math.abs(grossProfit))}`, highlight: true },
-        { label: "Profit Margin", value: `${profitMargin.toFixed(2)}%` }
+        { label: "Net Profit/Loss", value: `${grossProfit >= 0 ? '' : '-'}${formatCurrency(Math.abs(grossProfit))} `, highlight: true },
+        { label: "Profit Margin", value: `${profitMargin.toFixed(2)}% ` }
       ]);
 
       // Add footer
@@ -3256,13 +3219,13 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
 
       worksheet.mergeCells('A3:B3');
       const addressRow2 = worksheet.getCell('A3');
-      addressRow2.value = `${COMPANY_INFO.address2}, ${COMPANY_INFO.city}`;
+      addressRow2.value = `${COMPANY_INFO.address2}, ${COMPANY_INFO.city} `;
       addressRow2.font = { size: 10 };
       addressRow2.alignment = { horizontal: 'center' };
 
       worksheet.mergeCells('A4:B4');
       const contactRow = worksheet.getCell('A4');
-      contactRow.value = `Phone: ${COMPANY_INFO.phone} | Email: ${COMPANY_INFO.email}`;
+      contactRow.value = `Phone: ${COMPANY_INFO.phone} | Email: ${COMPANY_INFO.email} `;
       contactRow.font = { size: 10 };
       contactRow.alignment = { horizontal: 'center' };
 
@@ -3277,22 +3240,22 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       worksheet.mergeCells('A7:B7');
       const subtitle = worksheet.getCell('A7');
       subtitle.value = category !== "all"
-        ? `${months[month - 1]} ${year} - Category: ${category}`
-        : `${months[month - 1]} ${year}`;
+        ? `${months[month - 1]} ${year} - Category: ${category} `
+        : `${months[month - 1]} ${year} `;
       subtitle.font = { size: 12 };
       subtitle.alignment = { horizontal: 'center' };
 
       worksheet.mergeCells('A8:B8');
       const dateRow = worksheet.getCell('A8');
-      dateRow.value = `Generated on: ${new Date().toLocaleString()}`;
+      dateRow.value = `Generated on: ${new Date().toLocaleString()} `;
       dateRow.font = { size: 10, italic: true };
       dateRow.alignment = { horizontal: 'center' };
 
       let currentRow = 10;
 
       // Revenue Section
-      worksheet.getCell(`A${currentRow}`).value = "REVENUE";
-      worksheet.getCell(`A${currentRow}`).font = { size: 14, bold: true, color: { argb: 'FFE11D26' } };
+      worksheet.getCell(`A${currentRow} `).value = "REVENUE";
+      worksheet.getCell(`A${currentRow} `).font = { size: 14, bold: true, color: { argb: 'FFE11D26' } };
       currentRow += 2;
 
       // Revenue header
@@ -3324,8 +3287,8 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       currentRow += 2;
 
       // Operating Expenses Section
-      worksheet.getCell(`A${currentRow}`).value = "OPERATING EXPENSES";
-      worksheet.getCell(`A${currentRow}`).font = { size: 14, bold: true, color: { argb: 'FFE11D26' } };
+      worksheet.getCell(`A${currentRow} `).value = "OPERATING EXPENSES";
+      worksheet.getCell(`A${currentRow} `).font = { size: 14, bold: true, color: { argb: 'FFE11D26' } };
       currentRow += 2;
 
       // Expenses header
@@ -3357,8 +3320,8 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       currentRow += 2;
 
       // Payroll Section
-      worksheet.getCell(`A${currentRow}`).value = "PAYROLL EXPENSES";
-      worksheet.getCell(`A${currentRow}`).font = { size: 14, bold: true, color: { argb: 'FFE11D26' } };
+      worksheet.getCell(`A${currentRow} `).value = "PAYROLL EXPENSES";
+      worksheet.getCell(`A${currentRow} `).font = { size: 14, bold: true, color: { argb: 'FFE11D26' } };
       currentRow += 2;
 
       // Payroll header
@@ -3371,7 +3334,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
 
       // Payroll item
       const payrollRow = worksheet.getRow(currentRow);
-      payrollRow.values = [`Employee Salaries (${periodPayrolls.length} payments)`, formatCurrency(totalPayroll)];
+      payrollRow.values = [`Employee Salaries(${periodPayrolls.length} payments)`, formatCurrency(totalPayroll)];
       payrollRow.alignment = { horizontal: 'left', vertical: 'middle' };
       currentRow++;
 
@@ -3395,18 +3358,18 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       currentRow++;
 
       const profitRow = worksheet.getRow(currentRow);
-      profitRow.values = ["Net Profit/Loss", `${grossProfit >= 0 ? '' : '-'}${formatCurrency(Math.abs(grossProfit))}`];
+      profitRow.values = ["Net Profit/Loss", `${grossProfit >= 0 ? '' : '-'}${formatCurrency(Math.abs(grossProfit))} `];
       profitRow.font = { size: 12, bold: true, color: { argb: grossProfit >= 0 ? 'FF10B981' : 'FFEF4444' } };
       currentRow++;
 
       const marginRow = worksheet.getRow(currentRow);
-      marginRow.values = ["Profit Margin", `${profitMargin.toFixed(2)}%`];
+      marginRow.values = ["Profit Margin", `${profitMargin.toFixed(2)}% `];
       marginRow.font = { size: 11 };
 
       // Set response headers
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      const categoryLabel = category !== "all" ? `-${category}` : "";
-      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month - 1]}-${year}${categoryLabel}.xlsx"`);
+      const categoryLabel = category !== "all" ? `- ${category} ` : "";
+      res.setHeader("Content-Disposition", `attachment; filename = "P&L-${months[month - 1]}-${year}${categoryLabel}.xlsx"`);
 
       // Write to response
       await workbook.xlsx.write(res);
@@ -3515,12 +3478,12 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
               spacing: { after: 100 }
             }),
             new Paragraph({
-              text: `${COMPANY_INFO.address2}, ${COMPANY_INFO.city}`,
+              text: `${COMPANY_INFO.address2}, ${COMPANY_INFO.city} `,
               alignment: AlignmentType.CENTER,
               spacing: { after: 100 }
             }),
             new Paragraph({
-              text: `Phone: ${COMPANY_INFO.phone} | Email: ${COMPANY_INFO.email}`,
+              text: `Phone: ${COMPANY_INFO.phone} | Email: ${COMPANY_INFO.email} `,
               alignment: AlignmentType.CENTER,
               spacing: { after: 400 }
             }),
@@ -3534,13 +3497,13 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
             }),
             new Paragraph({
               text: category !== "all"
-                ? `${months[month - 1]} ${year} - Category: ${category}`
-                : `${months[month - 1]} ${year}`,
+                ? `${months[month - 1]} ${year} - Category: ${category} `
+                : `${months[month - 1]} ${year} `,
               alignment: AlignmentType.CENTER,
               spacing: { after: 100 }
             }),
             new Paragraph({
-              children: [new TextRun({ text: `Generated on: ${new Date().toLocaleString()}`, italics: true })],
+              children: [new TextRun({ text: `Generated on: ${new Date().toLocaleString()} `, italics: true })],
               alignment: AlignmentType.CENTER,
               spacing: { after: 400 }
             }),
@@ -3647,7 +3610,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
                 }),
                 new TableRow({
                   children: [
-                    new TableCell({ children: [new Paragraph(`Employee Salaries (${periodPayrolls.length} payments)`)] }),
+                    new TableCell({ children: [new Paragraph(`Employee Salaries(${periodPayrolls.length} payments)`)] }),
                     new TableCell({ children: [new Paragraph({ text: formatCurrency(totalPayroll), alignment: AlignmentType.RIGHT })] })
                   ]
                 }),
@@ -3683,7 +3646,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
               children: [
                 new TextRun({ text: "Net Profit/Loss: ", bold: true, size: 28 }),
                 new TextRun({
-                  text: `${grossProfit >= 0 ? '' : '-'}${formatCurrency(Math.abs(grossProfit))}`,
+                  text: `${grossProfit >= 0 ? '' : '-'}${formatCurrency(Math.abs(grossProfit))} `,
                   bold: true,
                   size: 28,
                   color: grossProfit >= 0 ? "10B981" : "EF4444"
@@ -3694,7 +3657,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
             new Paragraph({
               children: [
                 new TextRun({ text: "Profit Margin: ", bold: true }),
-                new TextRun(`${profitMargin.toFixed(2)}%`)
+                new TextRun(`${profitMargin.toFixed(2)}% `)
               ]
             }),
 
@@ -3704,12 +3667,12 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
               spacing: { before: 600 }
             }),
             new Paragraph({
-              text: `${COMPANY_INFO.name} | ${COMPANY_INFO.address1}, ${COMPANY_INFO.address2}, ${COMPANY_INFO.city}`,
+              text: `${COMPANY_INFO.name} | ${COMPANY_INFO.address1}, ${COMPANY_INFO.address2}, ${COMPANY_INFO.city} `,
               alignment: AlignmentType.CENTER,
               spacing: { after: 100 }
             }),
             new Paragraph({
-              text: `Phone: ${COMPANY_INFO.phone} | Email: ${COMPANY_INFO.email}`,
+              text: `Phone: ${COMPANY_INFO.phone} | Email: ${COMPANY_INFO.email} `,
               alignment: AlignmentType.CENTER
             })
           ]
@@ -3718,8 +3681,8 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
 
       // Set response headers
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-      const categoryLabel = category !== "all" ? `-${category}` : "";
-      res.setHeader("Content-Disposition", `attachment; filename="P&L-${months[month - 1]}-${year}${categoryLabel}.docx"`);
+      const categoryLabel = category !== "all" ? `- ${category} ` : "";
+      res.setHeader("Content-Disposition", `attachment; filename = "P&L-${months[month - 1]}-${year}${categoryLabel}.docx"`);
 
       // Write to response using Packer
       const { Packer } = await import("docx");
@@ -9591,32 +9554,32 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
                 new TableRow({
                   children: [
                     new TableCell({
-                      children: [new Paragraph({ text: "Date", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Date", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 15, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Employee", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Employee", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 25, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Department", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Department", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 20, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Status", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Status", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 15, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Check In", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Check In", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 12, type: WidthType.PERCENTAGE }
                     }),
                     new TableCell({
-                      children: [new Paragraph({ text: "Check Out", bold: true })],
+                      children: [new Paragraph({ children: [new TextRun({ text: "Check Out", bold: true })] })],
                       shading: { fill: "E11D26", type: ShadingType.SOLID },
                       width: { size: 13, type: WidthType.PERCENTAGE }
                     })
@@ -10254,7 +10217,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
 
       // Check if file exists on filesystem
       try {
-        await fs.access(file.fileUrl);
+        await fsPromises.access(file.fileUrl);
       } catch (error) {
         return res.status(404).json({ error: "File not found on server" });
       }
@@ -10294,7 +10257,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
 
       // Delete file from filesystem
       try {
-        await fs.unlink(file.fileUrl);
+        await fsPromises.unlink(file.fileUrl);
       } catch (error) {
         console.error("Error deleting file from filesystem:", error);
         // Continue with database deletion even if file doesn't exist
@@ -10446,9 +10409,9 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       // Handle thumbnail upload
       if (req.file) {
         const uploadDir = "uploads/thumbnails";
-        await fs.mkdir(uploadDir, { recursive: true });
+        await fsPromises.mkdir(uploadDir, { recursive: true });
         const newPath = path.join(uploadDir, `${Date.now()}-${req.file.originalname}`);
-        await fs.rename(req.file.path, newPath);
+        await fsPromises.rename(req.file.path, newPath);
         data.thumbnailUrl = newPath;
       }
 
@@ -10491,14 +10454,14 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       // Handle thumbnail upload
       if (req.file) {
         const uploadDir = "uploads/thumbnails";
-        await fs.mkdir(uploadDir, { recursive: true });
+        await fsPromises.mkdir(uploadDir, { recursive: true });
         const newPath = path.join(uploadDir, `${Date.now()}-${req.file.originalname}`);
-        await fs.rename(req.file.path, newPath);
+        await fsPromises.rename(req.file.path, newPath);
 
         // Delete old thumbnail if it exists
         if (existing.thumbnailUrl) {
           try {
-            await fs.unlink(existing.thumbnailUrl);
+            await fsPromises.unlink(existing.thumbnailUrl);
           } catch (e) {
             console.error("Error deleting old thumbnail:", e);
           }
@@ -10543,7 +10506,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       // Delete thumbnail if it exists
       if (existing.thumbnailUrl) {
         try {
-          await fs.unlink(existing.thumbnailUrl);
+          await fsPromises.unlink(existing.thumbnailUrl);
         } catch (e) {
           console.error("Error deleting thumbnail:", e);
         }
@@ -10618,8 +10581,6 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
           // This shows BOTH client messages AND admin/team replies
           const clientProjects = await db.select({ id: projects.id }).from(projects).where(eq(projects.clientId, user.clientId));
           const projectIds = clientProjects.map(p => p.id);
-
-          console.log("🔵 Client unified inbox - fetching messages for", projectIds.length, "projects");
 
           if (projectIds.length === 0) {
             return res.json([]);
@@ -10784,7 +10745,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       wsService.broadcastMessage(data.projectId, message);
 
       // Create notifications for project members
-      await notificationService.notifyNewMessage(data.projectId, req.userId!, data.content);
+      await notificationService.notifyNewMessage(data.projectId, req.userId!, data.content || "Attached a file");
 
       res.json(message);
     } catch (error: any) {
@@ -10814,21 +10775,21 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       ];
       if (!allowedMimeTypes.includes(req.file.mimetype)) {
         // Delete uploaded file
-        await fs.unlink(req.file.path).catch(() => { });
+        await fsPromises.unlink(req.file.path).catch(() => { });
         return res.status(400).json({ error: "File type not allowed. Only images and documents (PDF, DOC, DOCX, TXT) are supported" });
       }
 
       // SECURITY: Validate file size - max 10MB
       const maxSize = 10 * 1024 * 1024; // 10MB
       if (req.file.size > maxSize) {
-        await fs.unlink(req.file.path).catch(() => { });
+        await fsPromises.unlink(req.file.path).catch(() => { });
         return res.status(400).json({ error: "File size exceeds 10MB limit" });
       }
 
       // Verify project exists
       const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
       if (!project) {
-        await fs.unlink(req.file.path).catch(() => { });
+        await fsPromises.unlink(req.file.path).catch(() => { });
         return res.status(404).json({ error: "Project not found" });
       }
 
@@ -10837,12 +10798,12 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       if (req.userRole === "client") {
         const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
         if (!user?.clientId) {
-          await fs.unlink(req.file.path).catch(() => { });
+          await fsPromises.unlink(req.file.path).catch(() => { });
           return res.status(403).json({ error: "No client associated with this user" });
         }
 
         if (project.clientId !== user.clientId) {
-          await fs.unlink(req.file.path).catch(() => { });
+          await fsPromises.unlink(req.file.path).catch(() => { });
           return res.status(403).json({ error: "Access denied: You can only upload files to your own projects" });
         }
       } else if (req.userRole === "developer" || req.userRole === "operational_head") {
@@ -10854,7 +10815,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
 
         const hasAccess = assignedTasks.some(task => task.projectId === projectId);
         if (!hasAccess) {
-          await fs.unlink(req.file.path).catch(() => { });
+          await fsPromises.unlink(req.file.path).catch(() => { });
           return res.status(403).json({ error: "Access denied: You can only upload files to projects you're assigned to" });
         }
       }
@@ -10862,7 +10823,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
 
       // Create chat uploads directory if it doesn't exist
       const chatUploadsDir = path.join(process.cwd(), "uploads", "chat");
-      await fs.mkdir(chatUploadsDir, { recursive: true });
+      await fsPromises.mkdir(chatUploadsDir, { recursive: true });
 
       // Move file to chat uploads directory with sanitized name
       const originalFileName = req.file.originalname;
@@ -10873,7 +10834,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       const uniqueFileName = `${sanitizedName}_${Date.now()}${fileExtension}`;
       const targetPath = path.join(chatUploadsDir, uniqueFileName);
 
-      await fs.rename(req.file.path, targetPath);
+      await fsPromises.rename(req.file.path, targetPath);
 
       const fileUrl = `/uploads/chat/${uniqueFileName}`;
       const fileType = req.file.mimetype;
@@ -10898,7 +10859,7 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
     } catch (error: any) {
       // Clean up uploaded file on error
       if (req.file?.path) {
-        await fs.unlink(req.file.path).catch(() => { });
+        await fsPromises.unlink(req.file.path).catch(() => { });
       }
       res.status(400).json({ error: error.message });
     }
@@ -10998,6 +10959,84 @@ export async function registerRoutes(app: Express, emailService: any): Promise<S
       res.json(logs);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Dynamic Roles Management
+  app.patch("/api/roles/:id", authenticateToken, auditMiddleware("update", "role"), async (req: AuthRequest, res) => {
+    try {
+      // Only admin can update roles
+      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+        return res.status(403).json({ error: "Access denied. Only admins can manage roles." });
+      }
+
+      const roleId = req.params.id;
+      const { name, description, permissions } = req.body;
+
+      // Check if role exists
+      const [existingRole] = await db.select().from(roles).where(eq(roles.id, roleId)).limit(1);
+      if (!existingRole) {
+        return res.status(404).json({ error: "Role not found" });
+      }
+
+      // If name is changing, check for uniqueness
+      if (name && name !== existingRole.name) {
+        const [duplicate] = await db.select().from(roles).where(eq(roles.name, name)).limit(1);
+        if (duplicate) {
+          return res.status(400).json({ error: "Role with this name already exists" });
+        }
+
+        // Also check if any users are using the OLD name, we might need to update them?
+        // For simplicity, treating 'role' column in users as a loose foreign key to role name.
+        // Ideally we should update users too if the role name changes.
+        await db.update(users).set({ role: name }).where(eq(users.role, existingRole.name));
+      }
+
+      const [updatedRole] = await db.update(roles)
+        .set({
+          name: name || existingRole.name,
+          description: description || existingRole.description,
+          permissions: permissions || existingRole.permissions,
+        })
+        .where(eq(roles.id, roleId))
+        .returning();
+
+      res.json(updatedRole);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/roles/:id", authenticateToken, auditMiddleware("delete", "role"), async (req: AuthRequest, res) => {
+    try {
+      // Only admin can delete roles
+      if (req.userRole !== "admin" && req.userRole !== "operational_head") {
+        return res.status(403).json({ error: "Access denied. Only admins can manage roles." });
+      }
+
+      const roleId = req.params.id;
+
+      // Get role details
+      const [role] = await db.select().from(roles).where(eq(roles.id, roleId)).limit(1);
+      if (!role) {
+        return res.status(404).json({ error: "Role not found" });
+      }
+
+      // Check if any users are assigned this role
+      // Note: users.role stores the role NAME string
+      const usersWithRole = await db.select().from(users).where(eq(users.role, role.name));
+
+      if (usersWithRole.length > 0) {
+        return res.status(400).json({
+          error: `Cannot delete role '${role.name}' because it is assigned to ${usersWithRole.length} user(s). Please reassign them first.`
+        });
+      }
+
+      await db.delete(roles).where(eq(roles.id, roleId));
+
+      res.json({ message: "Role deleted successfully" });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
     }
   });
 

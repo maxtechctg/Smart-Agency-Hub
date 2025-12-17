@@ -29,12 +29,13 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser & Partial<Pick<User, 'role' | 'clientId'>>): Promise<User> {
     const id = randomUUID();
-    const user: User = { 
+    const user: User = {
       ...insertUser,
       role: insertUser.role ?? "developer",
       clientId: insertUser.clientId ?? null,
       id,
       createdAt: new Date(),
+      isActive: insertUser.isActive ?? true,
     };
     this.users.set(id, user);
     return user;

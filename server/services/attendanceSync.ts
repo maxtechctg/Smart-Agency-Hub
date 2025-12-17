@@ -5,12 +5,12 @@
  */
 
 import { db } from "../db";
-import { 
-  attendanceDevices, 
-  deviceLogs, 
-  attendance, 
-  hrSettings, 
-  employees 
+import {
+  attendanceDevices,
+  deviceLogs,
+  attendance,
+  hrSettings,
+  employees
 } from "@shared/schema";
 import { eq, and, gte, sql } from "drizzle-orm";
 import { createDeviceAdapter, DeviceLog } from "./deviceAdapters";
@@ -64,29 +64,29 @@ class AttendanceSyncService {
         try {
           const synced = await Promise.race([
             this.syncDevice(device),
-            new Promise<number>((_, reject) => 
+            new Promise<number>((_, reject) =>
               setTimeout(() => reject(new Error('Device sync timeout (60s)')), 60000)
             )
           ]);
           return { success: true, synced, deviceName: device.name };
         } catch (error: any) {
           console.error(`Error syncing device ${device.name}:`, error.message);
-          
+
           // Update device with error (non-blocking)
           await db
             .update(attendanceDevices)
-            .set({ 
+            .set({
               lastSyncError: error.message,
               lastSyncAt: new Date()
             })
             .where(eq(attendanceDevices.id, device.id));
-          
+
           return { success: false, error: error.message, deviceName: device.name };
         }
       });
 
       const results = await Promise.allSettled(syncPromises);
-      
+
       results.forEach((result) => {
         if (result.status === 'fulfilled') {
           if (result.value.success && result.value.synced !== undefined) {
@@ -116,7 +116,7 @@ class AttendanceSyncService {
     try {
       // Create appropriate device adapter
       const adapter = createDeviceAdapter(device.deviceType);
-      
+
       // Connect to device
       const connected = await adapter.connect({
         id: device.id,
@@ -143,12 +143,12 @@ class AttendanceSyncService {
         // Update last sync time even if no new logs
         await db
           .update(attendanceDevices)
-          .set({ 
+          .set({
             lastSyncAt: new Date(),
-            lastSyncError: null 
+            lastSyncError: null
           })
           .where(eq(attendanceDevices.id, device.id));
-        
+
         return 0;
       }
 
@@ -158,9 +158,9 @@ class AttendanceSyncService {
       // Update device sync status
       await db
         .update(attendanceDevices)
-        .set({ 
+        .set({
           lastSyncAt: new Date(),
-          lastSyncError: null 
+          lastSyncError: null
         })
         .where(eq(attendanceDevices.id, device.id));
 
@@ -228,7 +228,7 @@ class AttendanceSyncService {
 
         // Mark log as synced
         await db.update(deviceLogs)
-          .set({ 
+          .set({
             synced: true,
             syncedAt: new Date()
           })
@@ -250,25 +250,25 @@ class AttendanceSyncService {
   private async processAttendanceFromLog(employee: any, log: DeviceLog): Promise<void> {
     try {
       const punchDate = new Date(log.punchTime);
-      const dateStr = toDateOnlyString(punchDate); // Timezone-safe YYYY-MM-DD
+      const dateStr = toDateOnlyString(punchDate)!; // Timezone-safe YYYY-MM-DD
 
       // Get HR settings for grace period and office hours
       const [settings] = await db.select().from(hrSettings).limit(1);
-      
+
       // Guard clause: If no HR settings exist, use defaults and create default settings
       if (!settings) {
         console.warn("No HR settings found, creating default settings");
         await db.insert(hrSettings).values({});
       }
-      
+
       const gracePeriodMinutes = settings?.gracePeriodMinutes || 15;
       const officeStartTime = settings?.officeStartTime || "09:00";
-      
+
       // Parse office start time
       const [startHour, startMinute] = officeStartTime.split(":").map(Number);
       const officeStart = new Date(punchDate);
       officeStart.setHours(startHour, startMinute, 0, 0);
-      
+
       // Grace period end time
       const graceEnd = new Date(officeStart.getTime() + gracePeriodMinutes * 60000);
 
@@ -294,7 +294,7 @@ class AttendanceSyncService {
           if (!existingAttendance.checkIn || new Date(existingAttendance.checkIn) > punchDate) {
             await db
               .update(attendance)
-              .set({ 
+              .set({
                 checkIn: log.punchTime,
                 status: status
               })
@@ -310,7 +310,7 @@ class AttendanceSyncService {
           });
         }
 
-        console.log(`Processed check-in for ${employee.fullName}: ${status} at ${log.punchTime.toISOString()}`);
+        console.log(`Processed check-in for ${employee.employeeId}: ${status} at ${log.punchTime.toISOString()}`);
       } else if (log.type === "check-out") {
         if (existingAttendance) {
           // Update check-out time if this is later
@@ -330,7 +330,7 @@ class AttendanceSyncService {
           });
         }
 
-        console.log(`Processed check-out for ${employee.fullName} at ${log.punchTime.toISOString()}`);
+        console.log(`Processed check-out for ${employee.employeeId} at ${log.punchTime.toISOString()}`);
       }
     } catch (error: any) {
       console.error(`Error processing attendance from log:`, error.message);
@@ -374,7 +374,7 @@ class AttendanceSyncService {
     }
 
     const adapter = createDeviceAdapter(device.deviceType);
-    
+
     const connected = await adapter.connect({
       id: device.id,
       name: device.name,

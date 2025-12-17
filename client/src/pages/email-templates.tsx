@@ -83,7 +83,7 @@ export default function EmailTemplates() {
         form.reset({
             name: template.name,
             subject: template.subject,
-            subject: template.subject,
+
             message: template.message,
             attachments: (template.attachments as any[]) || []
         });
@@ -137,7 +137,7 @@ export default function EmailTemplates() {
                                 <p className="text-sm text-muted-foreground line-clamp-3 bg-muted p-2 rounded-md font-mono whitespace-pre-wrap">
                                     {template.message}
                                 </p>
-                                {template.attachments && (template.attachments as any[]).length > 0 && (
+                                {((template.attachments as any[])?.length || 0) > 0 && (
                                     <div className="mt-2 flex items-center text-xs text-muted-foreground">
                                         <Paperclip className="w-3 h-3 mr-1" />
                                         {(template.attachments as any[]).length} attachment(s)

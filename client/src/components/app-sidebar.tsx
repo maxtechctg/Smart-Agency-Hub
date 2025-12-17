@@ -272,9 +272,20 @@ export function AppSidebar() {
       }
 
       const resourceId = item.url.split('/')[1]; // e.g. "leads", "projects"
+
       // Handle HR sub-routes
       if (item.url.startsWith("/hr/")) return permissions.includes("hr");
+      if (item.url.startsWith("/attendance")) return permissions.includes("hr");
+
+      // Handle Accounts
       if (item.url.startsWith("/accounts/")) return permissions.includes("finance");
+      if (item.url.startsWith("/invoices") || item.url.startsWith("/payments")) return permissions.includes("finance");
+
+      // Handle Communication
+      if (item.url.startsWith("/chat") || item.url.startsWith("/files")) return permissions.includes("communication");
+
+      // Handle Settings
+      if (item.url.startsWith("/office-settings") || item.url.startsWith("/audit-logs")) return permissions.includes("settings");
 
       return permissions.includes(resourceId);
     }
